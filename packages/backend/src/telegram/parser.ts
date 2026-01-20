@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TRADING_ASSET } from '../hyperliquid/client.js';
 
 /**
  * Natural language command parser for trading commands
@@ -121,7 +122,7 @@ export function formatTradeCommand(cmd: TradeCommand): string {
   const sideText = cmd.side.toUpperCase();
   const typeText = cmd.orderType === 'market' ? 'Market' : `Limit @ $${cmd.limitPrice}`;
 
-  return `${sideEmoji} ${sideText} GOLD\n💰 Size: $${cmd.sizeUsd}\n📊 Leverage: ${cmd.leverage}x\n⚡ Type: ${typeText}`;
+  return `${sideEmoji} ${sideText} ${TRADING_ASSET}\n💰 Size: $${cmd.sizeUsd}\n📊 Leverage: ${cmd.leverage}x\n⚡ Type: ${typeText}`;
 }
 
 /**

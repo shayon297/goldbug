@@ -23,7 +23,7 @@ import {
   updateUserPreferences,
   type OrderContext,
 } from '../state/db.js';
-import { getHyperliquidClient } from '../hyperliquid/client.js';
+import { getHyperliquidClient, TRADING_ASSET } from '../hyperliquid/client.js';
 
 const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
 
@@ -48,10 +48,10 @@ async function getAccountSummary(walletAddress: string): Promise<string> {
     const pnlEmoji = parseFloat(pnl) >= 0 ? '🟢' : '🔴';
     const leverage = position.position.leverage.value;
 
-    positionText = `${side} ${Math.abs(size).toFixed(4)} GOLD @ ${leverage}x\nEntry: $${entry}\n${pnlEmoji} PnL: $${pnl}`;
+    positionText = `${side} ${Math.abs(size).toFixed(4)} ${TRADING_ASSET} @ ${leverage}x\nEntry: $${entry}\n${pnlEmoji} PnL: $${pnl}`;
   }
 
-  return `💰 *Account Balance*: $${balance}\n💵 *Withdrawable*: $${withdrawable}\n\n📊 *GOLD Position*\n${positionText}\n\n💲 *GOLD Price*: $${price.toFixed(2)}`;
+  return `💰 *Account Balance*: $${balance}\n💵 *Withdrawable*: $${withdrawable}\n\n📊 *${TRADING_ASSET} Position*\n${positionText}\n\n💲 *${TRADING_ASSET} Price*: $${price.toFixed(2)}`;
 }
 
 /**
@@ -65,8 +65,8 @@ export function registerHandlers(bot: Telegraf) {
 
     if (!exists) {
       await ctx.replyWithMarkdown(
-        '🥇 *Welcome to GOLD Trade*\n\n' +
-          'Trade GOLD with up to 20x leverage on Hyperliquid.\n\n' +
+        `🥇 *Welcome to ${TRADING_ASSET} Trade*\n\n` +
+          `Trade ${TRADING_ASSET} with up to 20x leverage on Hyperliquid.\n\n` +
           '🔐 Connect your wallet to get started:',
         connectWalletKeyboard(MINIAPP_URL)
       );
@@ -226,7 +226,7 @@ export function registerHandlers(bot: Telegraf) {
     await updateSession(telegramId, session);
 
     await ctx.editMessageText(
-      `${session.side?.toUpperCase()} GOLD\nSize: $${session.sizeUsd}\nLeverage: ${leverage}x\n\nSelect order type:`,
+      `${session.side?.toUpperCase()} ${TRADING_ASSET}\nSize: $${session.sizeUsd}\nLeverage: ${leverage}x\n\nSelect order type:`,
       orderTypeKeyboard()
     );
   });
@@ -304,7 +304,7 @@ export function registerHandlers(bot: Telegraf) {
         if (response?.filled) {
           await ctx.editMessageText(
             `✅ *Order Filled*\n\n` +
-              `${session.side.toUpperCase()} ${response.filled.totalSz} GOLD\n` +
+              `${session.side.toUpperCase()} ${response.filled.totalSz} ${TRADING_ASSET}\n` +
               `Avg Price: $${response.filled.avgPx}`,
             { parse_mode: 'Markdown', ...postOrderKeyboard() }
           );
@@ -350,7 +350,7 @@ export function registerHandlers(bot: Telegraf) {
         if (response?.filled) {
           await ctx.editMessageText(
             `✅ *Position Closed*\n\n` +
-              `Size: ${response.filled.totalSz} GOLD\n` +
+              `Size: ${response.filled.totalSz} ${TRADING_ASSET}\n` +
               `Close Price: $${response.filled.avgPx}`,
             { parse_mode: 'Markdown', ...mainMenuKeyboard() }
           );
@@ -408,7 +408,7 @@ async function handleSideSelection(ctx: Context, side: 'long' | 'short') {
   await updateSession(telegramId, session);
 
   const sideEmoji = side === 'long' ? '📈' : '📉';
-  await ctx.reply(`${sideEmoji} ${side.toUpperCase()} GOLD\n\nSelect size:`, sizeSelectionKeyboard());
+  await ctx.reply(`${sideEmoji} ${side.toUpperCase()} ${TRADING_ASSET}\n\nSelect size:`, sizeSelectionKeyboard());
 }
 
 async function handleViewPosition(ctx: Context) {
@@ -423,7 +423,7 @@ async function handleViewPosition(ctx: Context) {
     const hasPosition = position && parseFloat(position.position.szi) !== 0;
 
     if (!hasPosition) {
-      await ctx.editMessageText('📊 *No GOLD Position*\n\nOpen a position to get started.', {
+      await ctx.editMessageText(`📊 *No ${TRADING_ASSET} Position*\n\nOpen a position to get started.`, {
         parse_mode: 'Markdown',
         ...positionKeyboard(false),
       });
@@ -441,8 +441,8 @@ async function handleViewPosition(ctx: Context) {
       : 'N/A';
 
     await ctx.editMessageText(
-      `📊 *GOLD Position*\n\n` +
-        `${side} ${Math.abs(size).toFixed(4)} GOLD\n` +
+      `📊 *${TRADING_ASSET} Position*\n\n` +
+        `${side} ${Math.abs(size).toFixed(4)} ${TRADING_ASSET}\n` +
         `📊 Leverage: ${leverage}x\n` +
         `💵 Entry: $${entry}\n` +
         `${pnlEmoji} Unrealized PnL: $${pnl}\n` +
@@ -480,7 +480,7 @@ async function handleViewOrders(ctx: Context) {
       })
       .join('\n');
 
-    await ctx.editMessageText(`📋 *Open GOLD Orders*\n\n${orderList}`, {
+    await ctx.editMessageText(`📋 *Open ${TRADING_ASSET} Orders*\n\n${orderList}`, {
       parse_mode: 'Markdown',
       ...ordersKeyboard(orders.map((o) => o.oid)),
     });
@@ -511,7 +511,7 @@ async function handleClosePosition(ctx: Context) {
 
     await ctx.editMessageText(
       `🔴 *Close Position?*\n\n` +
-        `${side} ${Math.abs(size).toFixed(4)} GOLD\n` +
+        `${side} ${Math.abs(size).toFixed(4)} ${TRADING_ASSET}\n` +
         `Current PnL: $${pnl}`,
       { parse_mode: 'Markdown', ...closeConfirmKeyboard() }
     );

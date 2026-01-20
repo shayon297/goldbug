@@ -9,7 +9,8 @@ import type {
   AssetPosition,
 } from './types.js';
 
-const GOLD_COIN = 'GOLD';
+// Configurable trading asset - defaults to BTC if TRADING_ASSET not set
+export const TRADING_ASSET = process.env.TRADING_ASSET || 'BTC';
 const SLIPPAGE_BPS = 100; // 1% slippage for market orders
 
 export class HyperliquidClient {
@@ -31,10 +32,10 @@ export class HyperliquidClient {
    */
   async initialize(): Promise<void> {
     const meta = await this.getMeta();
-    const goldIndex = meta.universe.findIndex((a) => a.name === GOLD_COIN);
+    const goldIndex = meta.universe.findIndex((a) => a.name === TRADING_ASSET);
 
     if (goldIndex === -1) {
-      throw new Error('GOLD market not found on Hyperliquid');
+      throw new Error(`${TRADING_ASSET} market not found on Hyperliquid`);
     }
 
     this.goldAssetIndex = goldIndex;
@@ -42,7 +43,7 @@ export class HyperliquidClient {
     this.goldMaxLeverage = meta.universe[goldIndex].maxLeverage;
 
     console.log(
-      `[Hyperliquid] Initialized: GOLD index=${goldIndex}, decimals=${this.goldDecimals}, maxLeverage=${this.goldMaxLeverage}`
+      `[Hyperliquid] Initialized: ${TRADING_ASSET} index=${goldIndex}, decimals=${this.goldDecimals}, maxLeverage=${this.goldMaxLeverage}`
     );
   }
 
@@ -69,7 +70,7 @@ export class HyperliquidClient {
       type: 'allMids',
     });
     const mids = response.data as Record<string, string>;
-    const goldPrice = mids[GOLD_COIN];
+    const goldPrice = mids[TRADING_ASSET];
 
     if (!goldPrice) {
       throw new Error('GOLD price not available');
@@ -94,7 +95,7 @@ export class HyperliquidClient {
    */
   async getGoldPosition(walletAddress: string): Promise<AssetPosition | null> {
     const state = await this.getUserState(walletAddress);
-    return state.assetPositions.find((p) => p.position.coin === GOLD_COIN) || null;
+    return state.assetPositions.find((p) => p.position.coin === TRADING_ASSET) || null;
   }
 
   /**
@@ -106,7 +107,7 @@ export class HyperliquidClient {
       user: walletAddress.toLowerCase(),
     });
     const orders = response.data as OpenOrder[];
-    return orders.filter((o) => o.coin === GOLD_COIN);
+    return orders.filter((o) => o.coin === TRADING_ASSET);
   }
 
   /**
