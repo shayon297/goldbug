@@ -1,9 +1,9 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm ci && npm run build"
+buildCommand = "cd packages/miniapp && npm ci && npm run build"
 
 [deploy]
-startCommand = "npm start"
+startCommand = "cd packages/miniapp && npm start"
 healthcheckPath = "/"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10
