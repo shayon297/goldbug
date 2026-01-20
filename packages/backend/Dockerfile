@@ -1,53 +1,29 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine
 
-# Install dependencies only when needed
-FROM base AS deps
 WORKDIR /app
 
-# Copy package files
+# Copy package files from monorepo root
 COPY package*.json ./
-COPY prisma ./prisma/
+COPY packages/backend/package*.json ./packages/backend/
+COPY packages/backend/prisma ./packages/backend/prisma/
 
 # Install dependencies
-RUN npm ci
+RUN npm ci --workspace=@goldbug/backend --include-workspace-root
 
 # Generate Prisma client
-RUN npx prisma generate
+RUN cd packages/backend && npx prisma generate
 
-# Rebuild the source code only when needed
-FROM base AS builder
-WORKDIR /app
-
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+# Copy backend source
+COPY packages/backend ./packages/backend/
 
 # Build TypeScript
-RUN npm run build
+RUN cd packages/backend && npm run build
 
-# Production image
-FROM base AS runner
-WORKDIR /app
-
-ENV NODE_ENV production
-
-# Create non-root user
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 expressjs
-
-# Copy built application
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/package.json ./package.json
-
-# Set ownership
-RUN chown -R expressjs:nodejs /app
-
-USER expressjs
+WORKDIR /app/packages/backend
 
 EXPOSE 3000
 
-ENV PORT 3000
+ENV NODE_ENV=production
+ENV PORT=3000
 
-CMD ["npm", "start"]
-
+CMD ["sh", "-c", "npx prisma db push --skip-generate && npm start"]
