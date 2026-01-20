@@ -1,0 +1,576 @@
+import { Context, Telegraf } from 'telegraf';
+import { Wallet } from 'ethers';
+import {
+  mainMenuKeyboard,
+  connectWalletKeyboard,
+  sizeSelectionKeyboard,
+  leverageSelectionKeyboard,
+  orderTypeKeyboard,
+  confirmOrderKeyboard,
+  postOrderKeyboard,
+  positionKeyboard,
+  settingsKeyboard,
+  ordersKeyboard,
+  closeConfirmKeyboard,
+} from './keyboards.js';
+import { parseTradeCommand, formatTradeCommand, sanitizeInput } from './parser.js';
+import {
+  getUserByTelegramId,
+  userExists,
+  getOrCreateSession,
+  updateSession,
+  clearSession,
+  updateUserPreferences,
+  type OrderContext,
+} from '../state/db.js';
+import { getHyperliquidClient } from '../hyperliquid/client.js';
+
+const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
+
+/**
+ * Format balance and position for display
+ */
+async function getAccountSummary(walletAddress: string): Promise<string> {
+  const hl = await getHyperliquidClient();
+  const state = await hl.getUserState(walletAddress);
+  const position = await hl.getGoldPosition(walletAddress);
+  const price = await hl.getGoldPrice();
+
+  const balance = parseFloat(state.marginSummary.accountValue).toFixed(2);
+  const withdrawable = parseFloat(state.withdrawable).toFixed(2);
+
+  let positionText = 'No position';
+  if (position && parseFloat(position.position.szi) !== 0) {
+    const size = parseFloat(position.position.szi);
+    const side = size > 0 ? '📈 LONG' : '📉 SHORT';
+    const entry = parseFloat(position.position.entryPx).toFixed(2);
+    const pnl = parseFloat(position.position.unrealizedPnl).toFixed(2);
+    const pnlEmoji = parseFloat(pnl) >= 0 ? '🟢' : '🔴';
+    const leverage = position.position.leverage.value;
+
+    positionText = `${side} ${Math.abs(size).toFixed(4)} GOLD @ ${leverage}x\nEntry: $${entry}\n${pnlEmoji} PnL: $${pnl}`;
+  }
+
+  return `💰 *Account Balance*: $${balance}\n💵 *Withdrawable*: $${withdrawable}\n\n📊 *GOLD Position*\n${positionText}\n\n💲 *GOLD Price*: $${price.toFixed(2)}`;
+}
+
+/**
+ * Register all bot command and callback handlers
+ */
+export function registerHandlers(bot: Telegraf) {
+  // /start command
+  bot.command('start', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const exists = await userExists(telegramId);
+
+    if (!exists) {
+      await ctx.replyWithMarkdown(
+        '🥇 *Welcome to GOLD Trade*\n\n' +
+          'Trade GOLD with up to 20x leverage on Hyperliquid.\n\n' +
+          '🔐 Connect your wallet to get started:',
+        connectWalletKeyboard(MINIAPP_URL)
+      );
+    } else {
+      const user = await getUserByTelegramId(telegramId);
+      if (!user) return;
+
+      try {
+        const summary = await getAccountSummary(user.walletAddress);
+        await ctx.replyWithMarkdown(summary, mainMenuKeyboard());
+      } catch (error) {
+        await ctx.reply('Error fetching account data. Please try again.', mainMenuKeyboard());
+      }
+    }
+  });
+
+  // /balance command
+  bot.command('balance', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    try {
+      const summary = await getAccountSummary(user.walletAddress);
+      await ctx.replyWithMarkdown(summary, mainMenuKeyboard());
+    } catch (error) {
+      await ctx.reply('Error fetching balance. Please try again.');
+    }
+  });
+
+  // /long and /short shortcuts
+  bot.command('long', async (ctx) => {
+    await handleSideSelection(ctx, 'long');
+  });
+
+  bot.command('short', async (ctx) => {
+    await handleSideSelection(ctx, 'short');
+  });
+
+  // Handle text messages (natural language commands)
+  bot.on('text', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      return; // Ignore if not connected
+    }
+
+    const session = await getOrCreateSession(telegramId);
+
+    // Check if waiting for custom input
+    if (session.step === 'select_size') {
+      const input = sanitizeInput(ctx.message.text);
+      const value = parseFloat(input.replace('$', ''));
+
+      if (!isNaN(value) && value >= 10 && value <= 100000) {
+        session.sizeUsd = value;
+        session.step = 'select_leverage';
+        await updateSession(telegramId, session);
+        await ctx.reply(`Size set to $${value}. Select leverage:`, leverageSelectionKeyboard());
+        return;
+      }
+    }
+
+    // Try to parse as natural language trade command
+    const sanitized = sanitizeInput(ctx.message.text);
+    const parsed = parseTradeCommand(sanitized);
+
+    if (parsed.success && parsed.command) {
+      // Store in session and go to confirm
+      const newSession: OrderContext = {
+        side: parsed.command.side,
+        sizeUsd: parsed.command.sizeUsd,
+        leverage: parsed.command.leverage,
+        orderType: parsed.command.orderType,
+        limitPrice: parsed.command.limitPrice,
+        step: 'confirm',
+      };
+      await updateSession(telegramId, newSession);
+
+      const summary = formatTradeCommand(parsed.command);
+      await ctx.replyWithMarkdown(`*Confirm Order*\n\n${summary}`, confirmOrderKeyboard());
+    }
+  });
+
+  // Callback query handlers
+  bot.action(/^action:(.+)$/, async (ctx) => {
+    const action = ctx.match[1];
+    await ctx.answerCbQuery();
+
+    switch (action) {
+      case 'long':
+        await handleSideSelection(ctx, 'long');
+        break;
+      case 'short':
+        await handleSideSelection(ctx, 'short');
+        break;
+      case 'position':
+        await handleViewPosition(ctx);
+        break;
+      case 'orders':
+        await handleViewOrders(ctx);
+        break;
+      case 'close':
+        await handleClosePosition(ctx);
+        break;
+      case 'cancel_all':
+        await handleCancelAllOrders(ctx);
+        break;
+      case 'settings':
+        await handleSettings(ctx);
+        break;
+      case 'menu':
+      case 'refresh':
+        await handleRefresh(ctx);
+        break;
+      case 'cancel':
+        await handleCancel(ctx);
+        break;
+    }
+  });
+
+  // Size selection
+  bot.action(/^size:(.+)$/, async (ctx) => {
+    const sizeValue = ctx.match[1];
+    await ctx.answerCbQuery();
+
+    const telegramId = BigInt(ctx.from!.id);
+    const session = await getOrCreateSession(telegramId);
+
+    if (sizeValue === 'custom') {
+      await ctx.editMessageText('Enter custom size (e.g., "$750" or "750"):');
+      return;
+    }
+
+    session.sizeUsd = parseInt(sizeValue, 10);
+    session.step = 'select_leverage';
+    await updateSession(telegramId, session);
+
+    await ctx.editMessageText(`Size: $${sizeValue}\n\nSelect leverage:`, leverageSelectionKeyboard());
+  });
+
+  // Leverage selection
+  bot.action(/^leverage:(\d+)$/, async (ctx) => {
+    const leverage = parseInt(ctx.match[1], 10);
+    await ctx.answerCbQuery();
+
+    const telegramId = BigInt(ctx.from!.id);
+    const session = await getOrCreateSession(telegramId);
+
+    session.leverage = leverage;
+    session.step = 'select_type';
+    await updateSession(telegramId, session);
+
+    await ctx.editMessageText(
+      `${session.side?.toUpperCase()} GOLD\nSize: $${session.sizeUsd}\nLeverage: ${leverage}x\n\nSelect order type:`,
+      orderTypeKeyboard()
+    );
+  });
+
+  // Order type selection
+  bot.action(/^type:(market|limit)$/, async (ctx) => {
+    const orderType = ctx.match[1] as 'market' | 'limit';
+    await ctx.answerCbQuery();
+
+    const telegramId = BigInt(ctx.from!.id);
+    const session = await getOrCreateSession(telegramId);
+
+    session.orderType = orderType;
+    session.step = 'confirm';
+    await updateSession(telegramId, session);
+
+    if (orderType === 'limit') {
+      await ctx.editMessageText('Enter limit price (e.g., "2800"):');
+      return;
+    }
+
+    const summary = formatTradeCommand({
+      side: session.side!,
+      sizeUsd: session.sizeUsd!,
+      leverage: session.leverage!,
+      orderType: session.orderType!,
+      limitPrice: session.limitPrice,
+    });
+
+    await ctx.editMessageText(`*Confirm Order*\n\n${summary}`, {
+      parse_mode: 'Markdown',
+      ...confirmOrderKeyboard(),
+    });
+  });
+
+  // Order confirmation
+  bot.action(/^confirm:(yes|no)$/, async (ctx) => {
+    const confirmed = ctx.match[1] === 'yes';
+    await ctx.answerCbQuery();
+
+    const telegramId = BigInt(ctx.from!.id);
+
+    if (!confirmed) {
+      await clearSession(telegramId);
+      await ctx.editMessageText('Order cancelled.', mainMenuKeyboard());
+      return;
+    }
+
+    const session = await getOrCreateSession(telegramId);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user || !session.side || !session.sizeUsd || !session.leverage || !session.orderType) {
+      await ctx.editMessageText('Session expired. Please try again.', mainMenuKeyboard());
+      return;
+    }
+
+    await ctx.editMessageText('⏳ Executing order...');
+
+    try {
+      const hl = await getHyperliquidClient();
+      const agentWallet = new Wallet(user.agentPrivateKey);
+
+      const result = await hl.placeOrder(agentWallet, {
+        side: session.side,
+        sizeUsd: session.sizeUsd,
+        leverage: session.leverage,
+        orderType: session.orderType,
+        limitPrice: session.limitPrice,
+      });
+
+      await clearSession(telegramId);
+
+      if (result.status === 'ok') {
+        const response = result.response?.data?.statuses[0];
+        if (response?.filled) {
+          await ctx.editMessageText(
+            `✅ *Order Filled*\n\n` +
+              `${session.side.toUpperCase()} ${response.filled.totalSz} GOLD\n` +
+              `Avg Price: $${response.filled.avgPx}`,
+            { parse_mode: 'Markdown', ...postOrderKeyboard() }
+          );
+        } else if (response?.resting) {
+          await ctx.editMessageText(
+            `📝 *Limit Order Placed*\n\nOrder ID: #${response.resting.oid}`,
+            { parse_mode: 'Markdown', ...postOrderKeyboard() }
+          );
+        } else {
+          await ctx.editMessageText('Order submitted.', postOrderKeyboard());
+        }
+      } else {
+        await ctx.editMessageText(`❌ Order failed: ${result.error || 'Unknown error'}`, mainMenuKeyboard());
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+    }
+  });
+
+  // Close position confirmation
+  bot.action('close:confirm', async (ctx) => {
+    await ctx.answerCbQuery();
+
+    const telegramId = BigInt(ctx.from!.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.editMessageText('Please connect your wallet first.');
+      return;
+    }
+
+    await ctx.editMessageText('⏳ Closing position...');
+
+    try {
+      const hl = await getHyperliquidClient();
+      const agentWallet = new Wallet(user.agentPrivateKey);
+
+      const result = await hl.closePosition(agentWallet, user.walletAddress);
+
+      if (result.status === 'ok') {
+        const response = result.response?.data?.statuses[0];
+        if (response?.filled) {
+          await ctx.editMessageText(
+            `✅ *Position Closed*\n\n` +
+              `Size: ${response.filled.totalSz} GOLD\n` +
+              `Close Price: $${response.filled.avgPx}`,
+            { parse_mode: 'Markdown', ...mainMenuKeyboard() }
+          );
+        } else {
+          await ctx.editMessageText('Position closed.', mainMenuKeyboard());
+        }
+      } else {
+        await ctx.editMessageText(`❌ Failed to close: ${result.error || 'Unknown error'}`, mainMenuKeyboard());
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+    }
+  });
+
+  // Cancel specific order
+  bot.action(/^cancel_order:(\d+)$/, async (ctx) => {
+    const orderId = parseInt(ctx.match[1], 10);
+    await ctx.answerCbQuery();
+
+    const telegramId = BigInt(ctx.from!.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) return;
+
+    try {
+      const hl = await getHyperliquidClient();
+      const agentWallet = new Wallet(user.agentPrivateKey);
+
+      const result = await hl.cancelOrder(agentWallet, orderId);
+
+      if (result.status === 'ok') {
+        await ctx.editMessageText(`✅ Order #${orderId} cancelled.`, mainMenuKeyboard());
+      } else {
+        await ctx.editMessageText(`❌ Failed to cancel: ${result.error}`, mainMenuKeyboard());
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+    }
+  });
+}
+
+// Handler helper functions
+async function handleSideSelection(ctx: Context, side: 'long' | 'short') {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+
+  if (!user) {
+    await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+    return;
+  }
+
+  const session: OrderContext = { side, step: 'select_size' };
+  await updateSession(telegramId, session);
+
+  const sideEmoji = side === 'long' ? '📈' : '📉';
+  await ctx.reply(`${sideEmoji} ${side.toUpperCase()} GOLD\n\nSelect size:`, sizeSelectionKeyboard());
+}
+
+async function handleViewPosition(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+
+  if (!user) return;
+
+  try {
+    const hl = await getHyperliquidClient();
+    const position = await hl.getGoldPosition(user.walletAddress);
+    const hasPosition = position && parseFloat(position.position.szi) !== 0;
+
+    if (!hasPosition) {
+      await ctx.editMessageText('📊 *No GOLD Position*\n\nOpen a position to get started.', {
+        parse_mode: 'Markdown',
+        ...positionKeyboard(false),
+      });
+      return;
+    }
+
+    const size = parseFloat(position.position.szi);
+    const side = size > 0 ? '📈 LONG' : '📉 SHORT';
+    const entry = parseFloat(position.position.entryPx).toFixed(2);
+    const pnl = parseFloat(position.position.unrealizedPnl).toFixed(2);
+    const pnlEmoji = parseFloat(pnl) >= 0 ? '🟢' : '🔴';
+    const leverage = position.position.leverage.value;
+    const liqPx = position.position.liquidationPx
+      ? `$${parseFloat(position.position.liquidationPx).toFixed(2)}`
+      : 'N/A';
+
+    await ctx.editMessageText(
+      `📊 *GOLD Position*\n\n` +
+        `${side} ${Math.abs(size).toFixed(4)} GOLD\n` +
+        `📊 Leverage: ${leverage}x\n` +
+        `💵 Entry: $${entry}\n` +
+        `${pnlEmoji} Unrealized PnL: $${pnl}\n` +
+        `⚠️ Liquidation: ${liqPx}`,
+      { parse_mode: 'Markdown', ...positionKeyboard(true) }
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+  }
+}
+
+async function handleViewOrders(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+
+  if (!user) return;
+
+  try {
+    const hl = await getHyperliquidClient();
+    const orders = await hl.getOpenOrders(user.walletAddress);
+
+    if (orders.length === 0) {
+      await ctx.editMessageText('📋 *No Open Orders*', {
+        parse_mode: 'Markdown',
+        ...mainMenuKeyboard(),
+      });
+      return;
+    }
+
+    const orderList = orders
+      .map((o) => {
+        const side = o.side === 'B' ? '📈 BUY' : '📉 SELL';
+        return `${side} ${o.sz} @ $${o.limitPx} (#${o.oid})`;
+      })
+      .join('\n');
+
+    await ctx.editMessageText(`📋 *Open GOLD Orders*\n\n${orderList}`, {
+      parse_mode: 'Markdown',
+      ...ordersKeyboard(orders.map((o) => o.oid)),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+  }
+}
+
+async function handleClosePosition(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+
+  if (!user) return;
+
+  try {
+    const hl = await getHyperliquidClient();
+    const position = await hl.getGoldPosition(user.walletAddress);
+
+    if (!position || parseFloat(position.position.szi) === 0) {
+      await ctx.editMessageText('No position to close.', mainMenuKeyboard());
+      return;
+    }
+
+    const size = parseFloat(position.position.szi);
+    const side = size > 0 ? 'LONG' : 'SHORT';
+    const pnl = parseFloat(position.position.unrealizedPnl).toFixed(2);
+
+    await ctx.editMessageText(
+      `🔴 *Close Position?*\n\n` +
+        `${side} ${Math.abs(size).toFixed(4)} GOLD\n` +
+        `Current PnL: $${pnl}`,
+      { parse_mode: 'Markdown', ...closeConfirmKeyboard() }
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+  }
+}
+
+async function handleCancelAllOrders(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+
+  if (!user) return;
+
+  try {
+    const hl = await getHyperliquidClient();
+    const agentWallet = new Wallet(user.agentPrivateKey);
+
+    await hl.cancelAllOrders(agentWallet, user.walletAddress);
+    await ctx.editMessageText('✅ All orders cancelled.', mainMenuKeyboard());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+  }
+}
+
+async function handleSettings(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+
+  if (!user) return;
+
+  await ctx.editMessageText('⚙️ *Settings*', {
+    parse_mode: 'Markdown',
+    ...settingsKeyboard(user.defaultLeverage, user.defaultSizeUsd),
+  });
+}
+
+async function handleRefresh(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+
+  if (!user) return;
+
+  try {
+    const summary = await getAccountSummary(user.walletAddress);
+    await ctx.editMessageText(summary, {
+      parse_mode: 'Markdown',
+      ...mainMenuKeyboard(),
+    });
+  } catch (error) {
+    await ctx.editMessageText('Error refreshing. Please try again.', mainMenuKeyboard());
+  }
+}
+
+async function handleCancel(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  await clearSession(telegramId);
+  await ctx.editMessageText('Cancelled.', mainMenuKeyboard());
+}
+

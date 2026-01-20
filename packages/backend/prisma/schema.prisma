@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  telegramId        BigInt   @id
+  privyUserId       String   @unique
+  walletAddress     String
+  agentAddress      String
+  agentKeyEncrypted String   // AES-256-GCM encrypted private key
+  defaultLeverage   Int      @default(1)
+  defaultSizeUsd    Float    @default(100)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  sessions Session[]
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  telegramId BigInt
+  context    String   // JSON: current order state (side, size, leverage, type)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [telegramId], references: [telegramId], onDelete: Cascade)
+
+  @@index([telegramId])
+  @@index([expiresAt])
+}
+
