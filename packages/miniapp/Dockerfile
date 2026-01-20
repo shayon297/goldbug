@@ -7,14 +7,14 @@ WORKDIR /app
 COPY package*.json ./
 COPY packages/miniapp/package*.json ./packages/miniapp/
 
-# Install dependencies
+# Install dependencies for workspace
 RUN npm ci --workspace=@goldbug/miniapp --include-workspace-root
 
 FROM base AS builder
 WORKDIR /app
 
+# Copy node_modules from root (npm workspaces installs here)
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/packages/miniapp/node_modules ./packages/miniapp/node_modules
 COPY . .
 
 # Build Next.js
@@ -31,7 +31,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
+# Copy public folder if it exists
 COPY --from=builder /app/packages/miniapp/public ./public
+
+# Copy standalone output
 COPY --from=builder --chown=nextjs:nodejs /app/packages/miniapp/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/packages/miniapp/.next/static ./.next/static
 
