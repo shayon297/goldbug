@@ -9,15 +9,31 @@ import type {
   AssetPosition,
 } from './types.js';
 
-// Configurable trading asset - defaults to BTC if TRADING_ASSET not set
-export const TRADING_ASSET = process.env.TRADING_ASSET || 'BTC';
+/**
+ * Trading asset configuration for HIP-3 builder perps
+ * Format: "dex:COIN" (e.g., "xyz:GOLD") or just "COIN" for native perps
+ */
+export const TRADING_ASSET = process.env.TRADING_ASSET || 'xyz:GOLD';
 const SLIPPAGE_BPS = 100; // 1% slippage for market orders
+
+// Parse dex and coin from TRADING_ASSET
+function parseAssetConfig(asset: string): { dex: string | null; coin: string; fullName: string } {
+  if (asset.includes(':')) {
+    const [dex, coin] = asset.split(':');
+    return { dex, coin, fullName: asset };
+  }
+  return { dex: null, coin: asset, fullName: asset };
+}
+
+const ASSET_CONFIG = parseAssetConfig(TRADING_ASSET);
 
 export class HyperliquidClient {
   private api: AxiosInstance;
-  private goldAssetIndex: number | null = null;
-  private goldDecimals: number = 2;
-  private goldMaxLeverage: number = 20;
+  private assetId: number | null = null;
+  private assetDecimals: number = 4;
+  private assetMaxLeverage: number = 20;
+  private perpDexIndex: number | null = null;
+  private indexInMeta: number | null = null;
 
   constructor(apiUrl: string = 'https://api.hyperliquid.xyz') {
     this.api = axios.create({
@@ -28,100 +44,173 @@ export class HyperliquidClient {
   }
 
   /**
-   * Initialize client by fetching GOLD market metadata
+   * Initialize client by fetching market metadata
+   * Supports both native perps and HIP-3 builder perps (xyz:GOLD, etc.)
    */
   async initialize(): Promise<void> {
-    const meta = await this.getMeta();
-    const goldIndex = meta.universe.findIndex((a) => a.name === TRADING_ASSET);
+    if (ASSET_CONFIG.dex) {
+      // HIP-3 builder perp - query dex-specific meta
+      await this.initializeHIP3Asset();
+    } else {
+      // Native perp - query main meta
+      await this.initializeNativeAsset();
+    }
+  }
 
-    if (goldIndex === -1) {
-      throw new Error(`${TRADING_ASSET} market not found on Hyperliquid`);
+  /**
+   * Initialize HIP-3 builder perp (e.g., xyz:GOLD)
+   */
+  private async initializeHIP3Asset(): Promise<void> {
+    // Get perp dex index from perpDexs response
+    const dexsResponse = await this.api.post('/info', { type: 'perpDexs' });
+    const dexs = dexsResponse.data as (null | { name: string })[];
+    
+    const dexIndex = dexs.findIndex((d) => d && d.name === ASSET_CONFIG.dex);
+    if (dexIndex === -1) {
+      throw new Error(`DEX "${ASSET_CONFIG.dex}" not found on Hyperliquid`);
+    }
+    this.perpDexIndex = dexIndex;
+
+    // Get meta for the specific dex
+    const meta = await this.getMeta();
+    const assetIndex = meta.universe.findIndex((a) => a.name === ASSET_CONFIG.fullName);
+
+    if (assetIndex === -1) {
+      throw new Error(`${ASSET_CONFIG.fullName} not found in ${ASSET_CONFIG.dex} dex`);
     }
 
-    this.goldAssetIndex = goldIndex;
-    this.goldDecimals = meta.universe[goldIndex].szDecimals;
-    this.goldMaxLeverage = meta.universe[goldIndex].maxLeverage;
+    this.indexInMeta = assetIndex;
+    this.assetDecimals = meta.universe[assetIndex].szDecimals;
+    this.assetMaxLeverage = meta.universe[assetIndex].maxLeverage;
+    
+    // Calculate asset ID for HIP-3 perps: 100000 + perp_dex_index * 10000 + index_in_meta
+    this.assetId = 100000 + this.perpDexIndex * 10000 + this.indexInMeta;
 
     console.log(
-      `[Hyperliquid] Initialized: ${TRADING_ASSET} index=${goldIndex}, decimals=${this.goldDecimals}, maxLeverage=${this.goldMaxLeverage}`
+      `[Hyperliquid] Initialized HIP-3 asset: ${ASSET_CONFIG.fullName} ` +
+      `dexIndex=${this.perpDexIndex}, indexInMeta=${this.indexInMeta}, ` +
+      `assetId=${this.assetId}, decimals=${this.assetDecimals}, maxLeverage=${this.assetMaxLeverage}`
     );
   }
 
-  private getAssetIndex(): number {
-    if (this.goldAssetIndex === null) {
+  /**
+   * Initialize native perp (BTC, ETH, etc.)
+   */
+  private async initializeNativeAsset(): Promise<void> {
+    const response = await this.api.post('/info', { type: 'meta' });
+    const meta = response.data as MetaResponse;
+    const assetIndex = meta.universe.findIndex((a) => a.name === ASSET_CONFIG.coin);
+
+    if (assetIndex === -1) {
+      throw new Error(`${ASSET_CONFIG.coin} not found on Hyperliquid`);
+    }
+
+    this.assetId = assetIndex;
+    this.indexInMeta = assetIndex;
+    this.assetDecimals = meta.universe[assetIndex].szDecimals;
+    this.assetMaxLeverage = meta.universe[assetIndex].maxLeverage;
+
+    console.log(
+      `[Hyperliquid] Initialized native asset: ${ASSET_CONFIG.coin} ` +
+      `assetId=${this.assetId}, decimals=${this.assetDecimals}, maxLeverage=${this.assetMaxLeverage}`
+    );
+  }
+
+  private getAssetId(): number {
+    if (this.assetId === null) {
       throw new Error('HyperliquidClient not initialized. Call initialize() first.');
     }
-    return this.goldAssetIndex;
+    return this.assetId;
   }
 
   /**
    * Fetch market metadata
+   * For HIP-3 perps, queries the specific dex
    */
   async getMeta(): Promise<MetaResponse> {
-    const response = await this.api.post('/info', { type: 'meta' });
+    const payload: { type: string; dex?: string } = { type: 'meta' };
+    if (ASSET_CONFIG.dex) {
+      payload.dex = ASSET_CONFIG.dex;
+    }
+    const response = await this.api.post('/info', payload);
     return response.data;
   }
 
   /**
-   * Get current GOLD mid price
+   * Get current asset mid price
    */
   async getGoldPrice(): Promise<number> {
-    const response = await this.api.post('/info', {
-      type: 'allMids',
-    });
+    const payload: { type: string; dex?: string } = { type: 'allMids' };
+    if (ASSET_CONFIG.dex) {
+      payload.dex = ASSET_CONFIG.dex;
+    }
+    const response = await this.api.post('/info', payload);
     const mids = response.data as Record<string, string>;
-    const goldPrice = mids[TRADING_ASSET];
+    const price = mids[ASSET_CONFIG.fullName];
 
-    if (!goldPrice) {
-      throw new Error('GOLD price not available');
+    if (!price) {
+      throw new Error(`${ASSET_CONFIG.fullName} price not available`);
     }
 
-    return parseFloat(goldPrice);
+    return parseFloat(price);
   }
 
   /**
    * Get user account state (balance, positions)
+   * For HIP-3 perps, we may need to query dex-specific state
    */
   async getUserState(walletAddress: string): Promise<UserState> {
-    const response = await this.api.post('/info', {
+    const payload: { type: string; user: string; dex?: string } = {
       type: 'clearinghouseState',
       user: walletAddress.toLowerCase(),
-    });
+    };
+    if (ASSET_CONFIG.dex) {
+      payload.dex = ASSET_CONFIG.dex;
+    }
+    const response = await this.api.post('/info', payload);
     return response.data;
   }
 
   /**
-   * Get GOLD position for a user
+   * Get position for the configured trading asset
    */
   async getGoldPosition(walletAddress: string): Promise<AssetPosition | null> {
     const state = await this.getUserState(walletAddress);
-    return state.assetPositions.find((p) => p.position.coin === TRADING_ASSET) || null;
+    return state.assetPositions.find((p) => p.position.coin === ASSET_CONFIG.fullName) || null;
   }
 
   /**
-   * Get open orders for GOLD
+   * Get open orders for the configured trading asset
    */
   async getOpenOrders(walletAddress: string): Promise<OpenOrder[]> {
-    const response = await this.api.post('/info', {
+    const payload: { type: string; user: string; dex?: string } = {
       type: 'openOrders',
       user: walletAddress.toLowerCase(),
-    });
+    };
+    if (ASSET_CONFIG.dex) {
+      payload.dex = ASSET_CONFIG.dex;
+    }
+    const response = await this.api.post('/info', payload);
     const orders = response.data as OpenOrder[];
-    return orders.filter((o) => o.coin === TRADING_ASSET);
+    return orders.filter((o) => o.coin === ASSET_CONFIG.fullName);
   }
 
   /**
-   * Update leverage for GOLD
+   * Update leverage for the configured asset
+   * Note: HIP-3 perps are isolated-only, so isCross is forced to false
    */
-  async updateLeverage(agentWallet: Wallet, leverage: number, isCross: boolean = true): Promise<void> {
-    if (leverage < 1 || leverage > this.goldMaxLeverage) {
-      throw new Error(`Leverage must be between 1 and ${this.goldMaxLeverage}`);
+  async updateLeverage(agentWallet: Wallet, leverage: number, isCross: boolean = false): Promise<void> {
+    if (leverage < 1 || leverage > this.assetMaxLeverage) {
+      throw new Error(`Leverage must be between 1 and ${this.assetMaxLeverage}`);
     }
+
+    // HIP-3 perps require isolated margin mode
+    const useIsolated = ASSET_CONFIG.dex ? false : isCross;
 
     const action = {
       type: 'updateLeverage',
-      asset: this.getAssetIndex(),
-      isCross,
+      asset: this.getAssetId(),
+      isCross: useIsolated,
       leverage,
     };
 
@@ -129,20 +218,20 @@ export class HyperliquidClient {
   }
 
   /**
-   * Place an order for GOLD
+   * Place an order for the configured trading asset
    */
   async placeOrder(agentWallet: Wallet, params: PlaceOrderParams): Promise<OrderResult> {
     // Validate leverage
-    if (params.leverage < 1 || params.leverage > 20) {
-      throw new Error('Leverage must be between 1 and 20');
+    if (params.leverage < 1 || params.leverage > this.assetMaxLeverage) {
+      throw new Error(`Leverage must be between 1 and ${this.assetMaxLeverage}`);
     }
 
     // Get current price for size calculation and market order pricing
     const midPrice = await this.getGoldPrice();
 
-    // Calculate size in GOLD units
-    const sizeInGold = params.sizeUsd / midPrice;
-    const roundedSize = this.roundToDecimals(sizeInGold, this.goldDecimals);
+    // Calculate size in asset units
+    const sizeInAsset = params.sizeUsd / midPrice;
+    const roundedSize = this.roundToDecimals(sizeInAsset, this.assetDecimals);
 
     if (roundedSize <= 0) {
       throw new Error('Order size too small');
@@ -169,7 +258,7 @@ export class HyperliquidClient {
       type: 'order',
       orders: [
         {
-          a: this.getAssetIndex(),
+          a: this.getAssetId(),
           b: params.side === 'long',
           p: this.formatPrice(orderPrice),
           s: roundedSize.toString(),
@@ -184,13 +273,13 @@ export class HyperliquidClient {
   }
 
   /**
-   * Close entire GOLD position at market
+   * Close entire position at market
    */
   async closePosition(agentWallet: Wallet, walletAddress: string): Promise<OrderResult> {
     const position = await this.getGoldPosition(walletAddress);
 
     if (!position || parseFloat(position.position.szi) === 0) {
-      throw new Error('No GOLD position to close');
+      throw new Error(`No ${ASSET_CONFIG.fullName} position to close`);
     }
 
     const size = Math.abs(parseFloat(position.position.szi));
@@ -205,7 +294,7 @@ export class HyperliquidClient {
       type: 'order',
       orders: [
         {
-          a: this.getAssetIndex(),
+          a: this.getAssetId(),
           b: !isLong, // Opposite direction to close
           p: this.formatPrice(closePrice),
           s: size.toString(),
@@ -227,7 +316,7 @@ export class HyperliquidClient {
       type: 'cancel',
       cancels: [
         {
-          a: this.getAssetIndex(),
+          a: this.getAssetId(),
           o: orderId,
         },
       ],
