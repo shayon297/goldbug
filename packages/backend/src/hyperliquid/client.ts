@@ -148,7 +148,9 @@ export class HyperliquidClient {
       ...(ASSET_CONFIG.dex && { dex: ASSET_CONFIG.dex }),
     });
     const mids = response.data as Record<string, string>;
-    const price = mids[ASSET_CONFIG.coin];
+    // For HIP-3 perps, the key is the full name (e.g., "xyz:GOLD")
+    const priceKey = ASSET_CONFIG.dex ? ASSET_CONFIG.fullName : ASSET_CONFIG.coin;
+    const price = mids[priceKey];
 
     if (!price) {
       throw new Error(`${ASSET_CONFIG.fullName} price not available`);
