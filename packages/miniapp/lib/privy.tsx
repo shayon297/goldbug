@@ -25,7 +25,9 @@ export function PrivyProviderWrapper({ children }: { children: ReactNode }) {
         },
         loginMethods: ['telegram', 'sms', 'email'],
         embeddedWallets: {
-          createOnLogin: 'users-without-wallets',
+          ethereum: {
+            createOnLogin: 'users-without-wallets',
+          },
         },
       }}
     >
