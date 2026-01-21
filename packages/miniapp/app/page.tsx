@@ -125,7 +125,7 @@ export default function Home() {
       // Approve agent on Hyperliquid using EIP-712 typed data signing
       const nonce = Date.now();
       
-      // Hyperliquid approveAgent EIP-712 typed data
+      // Hyperliquid approveAgent EIP-712 typed data (L1 signing format)
       const domain = {
         name: 'HyperliquidSignTransaction',
         version: '1',
@@ -133,45 +133,65 @@ export default function Home() {
         verifyingContract: '0x0000000000000000000000000000000000000000',
       };
 
+      // Correct types for ApproveAgent action
       const types = {
-        HyperliquidTransaction: [
-          { name: 'action', type: 'string' },
+        'HyperliquidTransaction:ApproveAgent': [
+          { name: 'hyperliquidChain', type: 'string' },
+          { name: 'agentAddress', type: 'address' },
+          { name: 'agentName', type: 'string' },
           { name: 'nonce', type: 'uint64' },
         ],
       };
 
+      // EIP-712 message matches the action fields (without type/signatureChainId)
+      const message = {
+        hyperliquidChain: 'Mainnet',
+        agentAddress: agentAddress,
+        agentName: '',
+        nonce,
+      };
+
+      // Action payload for the API
       const action = {
         type: 'approveAgent',
         hyperliquidChain: 'Mainnet',
         signatureChainId: '0xa4b1',
-        agentAddress: agentAddress.toLowerCase(),
+        agentAddress: agentAddress,
         agentName: null,
         nonce,
       };
 
-      const message = {
-        action: JSON.stringify(action),
-        nonce,
-      };
-
       // Sign using Privy's embedded wallet
+      const typedData = {
+        domain,
+        types,
+        primaryType: 'HyperliquidTransaction:ApproveAgent',
+        message,
+      };
+      
+      console.log('[MiniApp] Signing typed data:', JSON.stringify(typedData, null, 2));
+      
       const signature = await provider.request({
         method: 'eth_signTypedData_v4',
-        params: [embeddedWallet.address, JSON.stringify({ domain, types, primaryType: 'HyperliquidTransaction', message })],
+        params: [embeddedWallet.address, JSON.stringify(typedData)],
       });
 
       // Parse signature
       const sig = ethers.Signature.from(signature as string);
+      console.log('[MiniApp] Signature:', { r: sig.r, s: sig.s, v: sig.v });
 
       // Send approveAgent to Hyperliquid
+      const requestBody = {
+        action,
+        nonce,
+        signature: { r: sig.r, s: sig.s, v: sig.v },
+      };
+      console.log('[MiniApp] Sending to Hyperliquid:', JSON.stringify(requestBody, null, 2));
+      
       const hlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          nonce,
-          signature: { r: sig.r, s: sig.s, v: sig.v },
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const hlResult = await hlResponse.json();
