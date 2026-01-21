@@ -31,6 +31,9 @@ async function main() {
   // Create Express app
   const app = express();
 
+  // Trust proxy (required for Railway/cloud deployments behind reverse proxy)
+  app.set('trust proxy', 1);
+
   // Security middleware
   app.use(helmet());
 
