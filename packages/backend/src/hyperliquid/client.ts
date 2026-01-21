@@ -106,6 +106,34 @@ export class HyperliquidClient {
   }
 
   /**
+   * Make an info API call with retry logic for rate limiting
+   */
+  private async infoRequest<T>(payload: Record<string, unknown>): Promise<T> {
+    const maxRetries = 3;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const response = await this.api.post('/info', payload);
+        return response.data as T;
+      } catch (error: unknown) {
+        const axiosError = error as { response?: { status?: number } };
+        if (axiosError.response?.status === 429) {
+          // Rate limited - exponential backoff
+          const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+          console.log(`[Hyperliquid] Rate limited on info request, retrying in ${Math.round(delay)}ms`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          lastError = error instanceof Error ? error : new Error('Rate limited');
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError || new Error('Max retries exceeded due to rate limiting');
+  }
+
+  /**
    * Initialize client by fetching market metadata
    * Supports both native perps and HIP-3 builder perps (xyz:GOLD, etc.)
    */
@@ -115,8 +143,7 @@ export class HyperliquidClient {
 
       if (ASSET_CONFIG.dex) {
         // For HIP-3 perps, first get perpDexs to find the dex index
-        const perpDexsResponse = await this.api.post('/info', { type: 'perpDexs' });
-        const perpDexs = perpDexsResponse.data as Array<{ name: string } | null>;
+        const perpDexs = await this.infoRequest<Array<{ name: string } | null>>({ type: 'perpDexs' });
         const dexIndex = perpDexs.findIndex((d) => d && d.name === ASSET_CONFIG.dex);
 
         if (dexIndex === -1) {
@@ -175,19 +202,17 @@ export class HyperliquidClient {
    * Fetch market metadata
    */
   async getMeta(dex?: string): Promise<MetaResponse> {
-    const response = await this.api.post('/info', { type: 'meta', ...(dex && { dex }) });
-    return response.data;
+    return this.infoRequest<MetaResponse>({ type: 'meta', ...(dex && { dex }) });
   }
 
   /**
    * Get current price for the configured trading asset
    */
   async getGoldPrice(): Promise<number> {
-    const response = await this.api.post('/info', {
+    const mids = await this.infoRequest<Record<string, string>>({
       type: 'allMids',
       ...(ASSET_CONFIG.dex && { dex: ASSET_CONFIG.dex }),
     });
-    const mids = response.data as Record<string, string>;
     // For HIP-3 perps, the key is the full name (e.g., "xyz:GOLD")
     const priceKey = ASSET_CONFIG.dex ? ASSET_CONFIG.fullName : ASSET_CONFIG.coin;
     const price = mids[priceKey];
@@ -206,11 +231,10 @@ export class HyperliquidClient {
    */
   async getUserState(walletAddress: string): Promise<UserState> {
     // Query main perps account - DO NOT pass dex param for balance
-    const response = await this.api.post('/info', {
+    return this.infoRequest<UserState>({
       type: 'clearinghouseState',
       user: walletAddress.toLowerCase(),
     });
-    return response.data;
   }
 
   /**
@@ -232,13 +256,12 @@ export class HyperliquidClient {
     if (ASSET_CONFIG.dex) {
       payload.dex = ASSET_CONFIG.dex;
     }
-    const response = await this.api.post('/info', payload);
-    const orders = response.data as OpenOrder[];
+    const orders = await this.infoRequest<OpenOrder[]>(payload);
     return orders.filter((o) => o.coin === ASSET_CONFIG.fullName);
   }
 
   /**
-   * Send an L1 action to the exchange
+   * Send an L1 action to the exchange with retry logic for rate limiting
    */
   private async sendAction(
     agentPrivateKey: string,
@@ -249,21 +272,44 @@ export class HyperliquidClient {
     // Ensure private key has 0x prefix
     const keyWithPrefix = agentPrivateKey.startsWith('0x') ? agentPrivateKey : '0x' + agentPrivateKey;
     const wallet = new Wallet(keyWithPrefix);
-    const timestamp = nonce || Date.now();
 
-    // Sign the action
-    const signature = await signL1Action(wallet, action, null, timestamp);
+    const maxRetries = 3;
+    let lastError: Error | null = null;
 
-    // Send to exchange
-    const response = await this.api.post('/exchange', {
-      action,
-      nonce: timestamp,
-      signature,
-      vaultAddress: walletAddress.toLowerCase(), // Trading on behalf of this address
-    });
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      // Use fresh timestamp for each attempt
+      const timestamp = nonce || Date.now();
 
-    console.log(`[Hyperliquid] Action response:`, JSON.stringify(response.data));
-    return response.data;
+      // Sign the action
+      const signature = await signL1Action(wallet, action, null, timestamp);
+
+      try {
+        // Send to exchange
+        const response = await this.api.post('/exchange', {
+          action,
+          nonce: timestamp,
+          signature,
+          vaultAddress: walletAddress.toLowerCase(), // Trading on behalf of this address
+        });
+
+        console.log(`[Hyperliquid] Action response:`, JSON.stringify(response.data));
+        return response.data;
+      } catch (error: unknown) {
+        const axiosError = error as { response?: { status?: number } };
+        if (axiosError.response?.status === 429) {
+          // Rate limited - exponential backoff
+          const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+          console.log(`[Hyperliquid] Rate limited, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          lastError = error instanceof Error ? error : new Error('Rate limited');
+        } else {
+          // Other error - don't retry
+          throw error;
+        }
+      }
+    }
+
+    throw lastError || new Error('Max retries exceeded due to rate limiting');
   }
 
   /**
