@@ -51,7 +51,7 @@ async function getAccountSummary(walletAddress: string): Promise<string> {
     positionText = `${side} ${Math.abs(size).toFixed(4)} ${TRADING_ASSET} @ ${leverage}x\nEntry: $${entry}\n${pnlEmoji} PnL: $${pnl}`;
   }
 
-  return `💰 *Account Balance*: $${balance}\n💵 *Withdrawable*: $${withdrawable}\n\n📊 *${TRADING_ASSET} Position*\n${positionText}\n\n💲 *${TRADING_ASSET} Price*: $${price.toFixed(2)}`;
+  return `🏦 *Wallet*\n\`${walletAddress}\`\n\n💰 *Account Balance*: $${balance}\n💵 *Withdrawable*: $${withdrawable}\n\n📊 *${TRADING_ASSET} Position*\n${positionText}\n\n💲 *${TRADING_ASSET} Price*: $${price.toFixed(2)}`;
 }
 
 /**
