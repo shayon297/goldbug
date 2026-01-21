@@ -125,11 +125,10 @@ export default function Home() {
       const provider = await embeddedWallet.getEthereumProvider();
       
       // Approve agent on Hyperliquid using EIP-712 typed data signing
-      // Based on official Python SDK: sign_user_signed_action + sign_agent
+      // Based on Hyperliquid docs: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/exchange-endpoint
       const nonce = Date.now();
-      // Python SDK uses 0x66eee (Arbitrum Sepolia) for signatureChainId even on mainnet
-      // "signatureChainId is the chain used by the wallet to sign and can be any chain"
-      const signatureChainId = '0x66eee'; // 421614
+      // signatureChainId must be Arbitrum One mainnet (42161 = 0xa4b1)
+      const signatureChainId = '0xa4b1'; // 42161 - Arbitrum One MAINNET
       
       // EIP-712 message - ONLY the 4 typed fields (no signatureChainId!)
       const eip712Message = {
@@ -139,12 +138,12 @@ export default function Home() {
         nonce: nonce,
       };
       
-      // EIP-712 typed data (matches Python SDK user_signed_payload)
+      // EIP-712 typed data - chainId MUST be 42161 (Arbitrum One mainnet)
       const typedData = {
         domain: {
           name: 'HyperliquidSignTransaction',
           version: '1',
-          chainId: parseInt(signatureChainId, 16), // 421614
+          chainId: 42161, // Arbitrum One mainnet - MUST match signatureChainId
           verifyingContract: '0x0000000000000000000000000000000000000000',
         },
         types: {
@@ -195,11 +194,15 @@ export default function Home() {
       });
 
       const hlResult = await hlResponse.json();
-      console.log('[Hyperliquid] approveAgent result:', hlResult);
+      console.log('[Hyperliquid] approveAgent result:', JSON.stringify(hlResult));
 
-      if (hlResult.status === 'err') {
-        throw new Error(hlResult.response || 'Failed to approve agent on Hyperliquid');
+      // Explicitly verify the approval succeeded
+      if (hlResult.status !== 'ok') {
+        const errorMsg = hlResult.response || hlResult.error || JSON.stringify(hlResult);
+        throw new Error(`Agent approval failed: ${errorMsg}`);
       }
+      
+      console.log('[Hyperliquid] Agent approved successfully:', agentAddress);
 
       // Get Privy access token
       const accessToken = await getAccessToken();
