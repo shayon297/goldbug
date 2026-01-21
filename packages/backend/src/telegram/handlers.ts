@@ -1,5 +1,5 @@
 import { Context, Telegraf } from 'telegraf';
-import { Wallet } from 'ethers';
+import { Wallet, ethers, Contract } from 'ethers';
 import {
   mainMenuKeyboard,
   connectWalletKeyboard,
@@ -27,17 +27,52 @@ import { getHyperliquidClient, TRADING_ASSET } from '../hyperliquid/client.js';
 
 const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
 
+// Arbitrum config for balance checking
+const ARBITRUM_RPC = 'https://arb1.arbitrum.io/rpc';
+const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
+
+/**
+ * Fetch Arbitrum USDC and ETH balances
+ */
+async function getArbitrumBalances(walletAddress: string): Promise<{ usdc: string; eth: string }> {
+  try {
+    const provider = new ethers.JsonRpcProvider(ARBITRUM_RPC);
+    const usdc = new Contract(USDC_ADDRESS, ERC20_ABI, provider);
+    
+    const [usdcBal, ethBal] = await Promise.all([
+      usdc.balanceOf(walletAddress),
+      provider.getBalance(walletAddress),
+    ]);
+    
+    return {
+      usdc: ethers.formatUnits(usdcBal, 6),
+      eth: ethers.formatUnits(ethBal, 18),
+    };
+  } catch (error) {
+    console.error('[Arbitrum] Failed to fetch balances:', error);
+    return { usdc: '0', eth: '0' };
+  }
+}
+
 /**
  * Format balance and position for display
  */
 async function getAccountSummary(walletAddress: string): Promise<string> {
   const hl = await getHyperliquidClient();
-  const state = await hl.getUserState(walletAddress);
-  const position = await hl.getGoldPosition(walletAddress);
-  const price = await hl.getGoldPrice();
+  
+  // Fetch all data in parallel
+  const [state, position, price, arbBalances] = await Promise.all([
+    hl.getUserState(walletAddress),
+    hl.getGoldPosition(walletAddress),
+    hl.getGoldPrice(),
+    getArbitrumBalances(walletAddress),
+  ]);
 
   const balance = parseFloat(state.marginSummary.accountValue).toFixed(2);
   const withdrawable = parseFloat(state.withdrawable).toFixed(2);
+  const arbUsdc = parseFloat(arbBalances.usdc).toFixed(2);
+  const arbEth = parseFloat(arbBalances.eth).toFixed(4);
 
   let positionText = 'No position';
   if (position && parseFloat(position.position.szi) !== 0) {
@@ -51,7 +86,15 @@ async function getAccountSummary(walletAddress: string): Promise<string> {
     positionText = `${side} ${Math.abs(size).toFixed(4)} ${TRADING_ASSET} @ ${leverage}x\nEntry: $${entry}\n${pnlEmoji} PnL: $${pnl}`;
   }
 
-  return `🏦 *Wallet*\n\`${walletAddress}\`\n\n💰 *Account Balance*: $${balance}\n💵 *Withdrawable*: $${withdrawable}\n\n📊 *${TRADING_ASSET} Position*\n${positionText}\n\n💲 *${TRADING_ASSET} Price*: $${price.toFixed(2)}`;
+  // Show bridge prompt if funds on Arbitrum but not on Hyperliquid
+  const needsBridge = parseFloat(arbBalances.usdc) >= 5 && parseFloat(balance) < 5;
+  const bridgeHint = needsBridge ? `\n\n⚠️ *You have USDC on Arbitrum!*\nUse /bridge to move it to Hyperliquid` : '';
+
+  return `🏦 *Wallet*\n\`${walletAddress}\`\n\n` +
+    `💎 *Hyperliquid*\n💰 Balance: $${balance}\n💵 Withdrawable: $${withdrawable}\n\n` +
+    `🔷 *Arbitrum*\n💵 USDC: $${arbUsdc}\n⛽ ETH: ${arbEth}${bridgeHint}\n\n` +
+    `📊 *${TRADING_ASSET} Position*\n${positionText}\n\n` +
+    `💲 *${TRADING_ASSET} Price*: $${price.toFixed(2)}`;
 }
 
 /**

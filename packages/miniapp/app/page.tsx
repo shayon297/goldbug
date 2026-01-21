@@ -38,19 +38,16 @@ export default function Home() {
   const [usdcBalance, setUsdcBalance] = useState<string>('0');
   const [bridgeAmount, setBridgeAmount] = useState<string>('');
   const [ethBalance, setEthBalance] = useState<string>('0');
-  const [directBridge, setDirectBridge] = useState(false);
+
+  // Check URL params once on mount
+  const isBridgeAction = typeof window !== 'undefined' && 
+    new URLSearchParams(window.location.search).get('action') === 'bridge';
 
   // Initialize Telegram Web App
   useEffect(() => {
     expandMiniApp();
     const user = getTelegramUser();
     setTelegramUser(user);
-
-    // Check if coming from /bridge command
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('action') === 'bridge') {
-      setDirectBridge(true);
-    }
 
     if (!user) {
       setError('Please open this app from Telegram');
@@ -64,7 +61,7 @@ export default function Home() {
 
     if (authenticated && wallets.length > 0) {
       // If coming from /bridge command, go straight to bridge
-      if (directBridge) {
+      if (isBridgeAction) {
         fetchBalances();
         setStep('bridge');
       } else {
@@ -73,7 +70,7 @@ export default function Home() {
     } else if (!authenticated) {
       setStep('login');
     }
-  }, [ready, authenticated, wallets, directBridge, fetchBalances]);
+  }, [ready, authenticated, wallets, isBridgeAction, fetchBalances]);
 
   // Handle login
   const handleLogin = useCallback(async () => {
