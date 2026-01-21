@@ -55,6 +55,13 @@ async function getAccountSummary(walletAddress: string): Promise<string> {
 }
 
 /**
+ * Format wallet address for display (truncated)
+ */
+function formatWalletAddress(address: string): string {
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+/**
  * Register all bot command and callback handlers
  */
 export function registerHandlers(bot: Telegraf) {
@@ -67,6 +74,11 @@ export function registerHandlers(bot: Telegraf) {
       await ctx.replyWithMarkdown(
         `🥇 *Welcome to ${TRADING_ASSET} Trade*\n\n` +
           `Trade ${TRADING_ASSET} with up to 20x leverage on Hyperliquid.\n\n` +
+          '*Features:*\n' +
+          '• Long or Short with 1-20x leverage\n' +
+          '• Market & Limit orders\n' +
+          '• Real-time position tracking\n' +
+          '• All from Telegram chat\n\n' +
           '🔐 Connect your wallet to get started:',
         connectWalletKeyboard(MINIAPP_URL)
       );
@@ -76,10 +88,181 @@ export function registerHandlers(bot: Telegraf) {
 
       try {
         const summary = await getAccountSummary(user.walletAddress);
-        await ctx.replyWithMarkdown(summary, mainMenuKeyboard());
+        const welcomeMsg = 
+          `🥇 *${TRADING_ASSET} Trading Bot*\n\n` +
+          `✅ *Wallet Connected*\n` +
+          `\`${formatWalletAddress(user.walletAddress)}\`\n\n` +
+          summary;
+        await ctx.replyWithMarkdown(welcomeMsg, mainMenuKeyboard());
       } catch (error) {
-        await ctx.reply('Error fetching account data. Please try again.', mainMenuKeyboard());
+        await ctx.replyWithMarkdown(
+          `🥇 *${TRADING_ASSET} Trading Bot*\n\n` +
+          `✅ *Wallet Connected*\n` +
+          `\`${formatWalletAddress(user.walletAddress)}\`\n\n` +
+          `⚠️ Could not fetch account data. Try /balance`,
+          mainMenuKeyboard()
+        );
       }
+    }
+  });
+
+  // /help command
+  bot.command('help', async (ctx) => {
+    await ctx.replyWithMarkdown(
+      `🥇 *${TRADING_ASSET} Trade Bot - Help*\n\n` +
+      `*Commands:*\n` +
+      `/start - Show main menu & status\n` +
+      `/long - Open a LONG position\n` +
+      `/short - Open a SHORT position\n` +
+      `/position - View current position\n` +
+      `/orders - View open orders\n` +
+      `/balance - Check account balance\n` +
+      `/close - Close your position\n` +
+      `/cancel - Cancel all orders\n` +
+      `/help - Show this help\n\n` +
+      `*Quick Commands:*\n` +
+      `You can also type natural language:\n` +
+      `• "Long 5x $500 market"\n` +
+      `• "Short 10x $1000 limit 2800"\n\n` +
+      `*Funding:*\n` +
+      `Deposit USDC via Hyperliquid (Arbitrum) to trade.`
+    );
+  });
+
+  // /position command
+  bot.command('position', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    try {
+      const hl = await getHyperliquidClient();
+      const position = await hl.getGoldPosition(user.walletAddress);
+
+      if (!position || parseFloat(position.position.szi) === 0) {
+        await ctx.replyWithMarkdown(`📊 *No ${TRADING_ASSET} Position*\n\nOpen a position to get started.`, mainMenuKeyboard());
+        return;
+      }
+
+      const size = parseFloat(position.position.szi);
+      const side = size > 0 ? '📈 LONG' : '📉 SHORT';
+      const entry = parseFloat(position.position.entryPx).toFixed(2);
+      const pnl = parseFloat(position.position.unrealizedPnl).toFixed(2);
+      const pnlEmoji = parseFloat(pnl) >= 0 ? '🟢' : '🔴';
+      const leverage = position.position.leverage.value;
+      const liqPx = position.position.liquidationPx
+        ? `$${parseFloat(position.position.liquidationPx).toFixed(2)}`
+        : 'N/A';
+
+      await ctx.replyWithMarkdown(
+        `📊 *${TRADING_ASSET} Position*\n\n` +
+          `${side} ${Math.abs(size).toFixed(4)} ${TRADING_ASSET}\n` +
+          `📊 Leverage: ${leverage}x\n` +
+          `💵 Entry: $${entry}\n` +
+          `${pnlEmoji} PnL: $${pnl}\n` +
+          `⚠️ Liquidation: ${liqPx}`,
+        positionKeyboard(true)
+      );
+    } catch (error) {
+      await ctx.reply('Error fetching position. Please try again.');
+    }
+  });
+
+  // /close command
+  bot.command('close', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    try {
+      const hl = await getHyperliquidClient();
+      const position = await hl.getGoldPosition(user.walletAddress);
+
+      if (!position || parseFloat(position.position.szi) === 0) {
+        await ctx.reply('No position to close.', mainMenuKeyboard());
+        return;
+      }
+
+      const size = parseFloat(position.position.szi);
+      const side = size > 0 ? 'LONG' : 'SHORT';
+      const pnl = parseFloat(position.position.unrealizedPnl).toFixed(2);
+
+      await ctx.replyWithMarkdown(
+        `🔴 *Close Position?*\n\n` +
+          `${side} ${Math.abs(size).toFixed(4)} ${TRADING_ASSET}\n` +
+          `Current PnL: $${pnl}`,
+        closeConfirmKeyboard()
+      );
+    } catch (error) {
+      await ctx.reply('Error fetching position. Please try again.');
+    }
+  });
+
+  // /cancel command (cancel all orders)
+  bot.command('cancel', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    try {
+      const hl = await getHyperliquidClient();
+      const orders = await hl.getOpenOrders(user.walletAddress);
+
+      if (orders.length === 0) {
+        await ctx.reply('No open orders to cancel.', mainMenuKeyboard());
+        return;
+      }
+
+      const agentWallet = new Wallet(user.agentPrivateKey);
+      await hl.cancelAllOrders(agentWallet, user.walletAddress);
+      await ctx.reply(`✅ Cancelled ${orders.length} order(s).`, mainMenuKeyboard());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.reply(`❌ Error: ${message}`, mainMenuKeyboard());
+    }
+  });
+
+  // /orders command
+  bot.command('orders', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    try {
+      const hl = await getHyperliquidClient();
+      const orders = await hl.getOpenOrders(user.walletAddress);
+
+      if (orders.length === 0) {
+        await ctx.replyWithMarkdown('📋 *No Open Orders*', mainMenuKeyboard());
+        return;
+      }
+
+      const orderList = orders
+        .map((o) => {
+          const side = o.side === 'B' ? '📈 BUY' : '📉 SELL';
+          return `${side} ${o.sz} @ $${o.limitPx} (#${o.oid})`;
+        })
+        .join('\n');
+
+      await ctx.replyWithMarkdown(`📋 *Open ${TRADING_ASSET} Orders*\n\n${orderList}`, ordersKeyboard(orders.map((o) => o.oid)));
+    } catch (error) {
+      await ctx.reply('Error fetching orders. Please try again.');
     }
   });
 

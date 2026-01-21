@@ -21,6 +21,7 @@ export default function Home() {
   const [step, setStep] = useState<Step>('init');
   const [error, setError] = useState<string | null>(null);
   const [telegramUser, setTelegramUser] = useState<{ id: number; firstName: string } | null>(null);
+  const [registeredWallet, setRegisteredWallet] = useState<string | null>(null);
 
   // Initialize Telegram Web App
   useEffect(() => {
@@ -103,12 +104,9 @@ export default function Home() {
         throw new Error(data.error || 'Registration failed');
       }
 
+      const data = await response.json();
+      setRegisteredWallet(data.walletAddress || embeddedWallet.address);
       setStep('success');
-
-      // Auto-close after success
-      setTimeout(() => {
-        closeMiniApp();
-      }, 2000);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       setError(message);
@@ -233,10 +231,26 @@ export default function Home() {
             </div>
 
             <h2 className="text-xl font-semibold mb-2 text-green-500">Connected!</h2>
+            
+            {registeredWallet && (
+              <div className="bg-zinc-800/50 rounded-lg p-3 mb-4 text-left">
+                <p className="text-xs text-zinc-500 mb-1">Your Trading Wallet</p>
+                <p className="text-sm font-mono text-zinc-300 break-all">
+                  {registeredWallet}
+                </p>
+                <p className="text-xs text-zinc-500 mt-2">
+                  💡 Fund this wallet with USDC on Hyperliquid to start trading
+                </p>
+              </div>
+            )}
+
             <p className="text-zinc-400 text-sm mb-4">
-              You can now trade GOLD in Telegram.
+              You can now trade xyz:GOLD in Telegram.
             </p>
-            <p className="text-zinc-500 text-xs">Closing automatically...</p>
+
+            <button onClick={() => closeMiniApp()} className="btn-gold w-full">
+              Return to Telegram
+            </button>
           </div>
         )}
 

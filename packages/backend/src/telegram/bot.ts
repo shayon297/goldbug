@@ -1,5 +1,21 @@
 import { Telegraf } from 'telegraf';
 import { registerHandlers } from './handlers.js';
+import { TRADING_ASSET } from '../hyperliquid/client.js';
+
+/**
+ * Bot command menu items
+ */
+const BOT_COMMANDS = [
+  { command: 'start', description: 'Show main menu & account status' },
+  { command: 'long', description: `Open a LONG position on ${TRADING_ASSET}` },
+  { command: 'short', description: `Open a SHORT position on ${TRADING_ASSET}` },
+  { command: 'position', description: 'View your current position' },
+  { command: 'orders', description: 'View open orders' },
+  { command: 'balance', description: 'Check account balance' },
+  { command: 'close', description: 'Close your position' },
+  { command: 'cancel', description: 'Cancel all open orders' },
+  { command: 'help', description: 'Show help & commands' },
+];
 
 /**
  * Initialize and configure the Telegram bot
@@ -28,6 +44,14 @@ export function createBot(): Telegraf {
  * Start bot with webhook or polling
  */
 export async function startBot(bot: Telegraf, webhookUrl?: string): Promise<void> {
+  // Set bot commands (menu)
+  try {
+    await bot.telegram.setMyCommands(BOT_COMMANDS);
+    console.log('[Bot] Command menu set');
+  } catch (error) {
+    console.error('[Bot] Failed to set commands:', error);
+  }
+
   if (webhookUrl) {
     // Production: use webhook
     const secretPath = process.env.TELEGRAM_WEBHOOK_SECRET || 'webhook-secret';
