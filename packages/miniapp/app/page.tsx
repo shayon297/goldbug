@@ -131,13 +131,12 @@ export default function Home() {
       // "signatureChainId is the chain used by the wallet to sign and can be any chain"
       const signatureChainId = '0x66eee'; // 421614
       
-      // Build the action - this IS the EIP-712 message (only typed fields are signed)
-      const action = {
+      // EIP-712 message - ONLY the 4 typed fields (no signatureChainId!)
+      const eip712Message = {
         hyperliquidChain: 'Mainnet',
         agentAddress: agentAddress,
         agentName: '',
         nonce: nonce,
-        signatureChainId: signatureChainId,
       };
       
       // EIP-712 typed data (matches Python SDK user_signed_payload)
@@ -145,7 +144,7 @@ export default function Home() {
         domain: {
           name: 'HyperliquidSignTransaction',
           version: '1',
-          chainId: parseInt(signatureChainId, 16), // 42161
+          chainId: parseInt(signatureChainId, 16), // 421614
           verifyingContract: '0x0000000000000000000000000000000000000000',
         },
         types: {
@@ -157,7 +156,7 @@ export default function Home() {
           ],
         },
         primaryType: 'HyperliquidTransaction:ApproveAgent',
-        message: action, // The action IS the message
+        message: eip712Message, // ONLY the 4 typed fields
       };
       
       console.log('[MiniApp] Signing typed data:', JSON.stringify(typedData, null, 2));
