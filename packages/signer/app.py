@@ -1,0 +1,155 @@
+import os
+from typing import Optional
+
+from eth_account import Account
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
+
+from hyperliquid.exchange import Exchange
+
+
+API_URL = os.getenv("HYPERLIQUID_API_URL", "https://api.hyperliquid.xyz")
+TRADING_ASSET = os.getenv("TRADING_ASSET", "xyz:GOLD")
+SIGNER_API_KEY = os.getenv("SIGNER_API_KEY")
+
+
+def parse_dex(asset: str) -> Optional[str]:
+    if ":" in asset:
+        return asset.split(":", 1)[0]
+    return None
+
+
+PERP_DEX = parse_dex(TRADING_ASSET)
+
+
+def ensure_hex_prefix(key: str) -> str:
+    return key if key.startswith("0x") else f"0x{key}"
+
+
+def require_api_key(x_signer_api_key: Optional[str]) -> None:
+    if SIGNER_API_KEY and x_signer_api_key != SIGNER_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid signer API key")
+
+
+def get_exchange(agent_private_key: str, wallet_address: str) -> Exchange:
+    key = ensure_hex_prefix(agent_private_key)
+    wallet = Account.from_key(key)
+    vault_address = wallet_address.lower()
+
+    perp_dexs = None
+    if PERP_DEX:
+        # Include builder perp dex for HIP-3 assets
+        perp_dexs = ["", PERP_DEX]
+
+    return Exchange(
+        wallet=wallet,
+        base_url=API_URL,
+        vault_address=vault_address,
+        perp_dexs=perp_dexs,
+        timeout=30,
+    )
+
+
+class BaseRequest(BaseModel):
+    agent_private_key: str = Field(..., min_length=32)
+    wallet_address: str = Field(..., min_length=40)
+
+
+class UpdateLeverageRequest(BaseRequest):
+    coin: str
+    leverage: int
+    is_cross: bool = False
+
+
+class LimitOrderRequest(BaseRequest):
+    coin: str
+    is_buy: bool
+    size: float
+    limit_px: float
+    tif: str = "Gtc"
+    reduce_only: bool = False
+
+
+class MarketOrderRequest(BaseRequest):
+    coin: str
+    is_buy: bool
+    size: float
+    slippage: float = 0.01
+    px: Optional[float] = None
+
+
+class MarketCloseRequest(BaseRequest):
+    coin: str
+    size: Optional[float] = None
+    slippage: float = 0.01
+    px: Optional[float] = None
+
+
+class CancelOrderRequest(BaseRequest):
+    coin: str
+    oid: int
+
+
+app = FastAPI()
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/l1/update_leverage")
+def update_leverage(
+    req: UpdateLeverageRequest, x_signer_api_key: Optional[str] = Header(default=None)
+):
+    require_api_key(x_signer_api_key)
+    exchange = get_exchange(req.agent_private_key, req.wallet_address)
+    return exchange.update_leverage(req.leverage, req.coin, req.is_cross)
+
+
+@app.post("/l1/order")
+def limit_order(req: LimitOrderRequest, x_signer_api_key: Optional[str] = Header(default=None)):
+    require_api_key(x_signer_api_key)
+    exchange = get_exchange(req.agent_private_key, req.wallet_address)
+    order_type = {"limit": {"tif": req.tif}}
+    return exchange.order(
+        name=req.coin,
+        is_buy=req.is_buy,
+        sz=req.size,
+        limit_px=req.limit_px,
+        order_type=order_type,
+        reduce_only=req.reduce_only,
+    )
+
+
+@app.post("/l1/market_open")
+def market_open(req: MarketOrderRequest, x_signer_api_key: Optional[str] = Header(default=None)):
+    require_api_key(x_signer_api_key)
+    exchange = get_exchange(req.agent_private_key, req.wallet_address)
+    return exchange.market_open(
+        name=req.coin,
+        is_buy=req.is_buy,
+        sz=req.size,
+        px=req.px,
+        slippage=req.slippage,
+    )
+
+
+@app.post("/l1/market_close")
+def market_close(req: MarketCloseRequest, x_signer_api_key: Optional[str] = Header(default=None)):
+    require_api_key(x_signer_api_key)
+    exchange = get_exchange(req.agent_private_key, req.wallet_address)
+    return exchange.market_close(
+        coin=req.coin,
+        sz=req.size,
+        px=req.px,
+        slippage=req.slippage,
+    )
+
+
+@app.post("/l1/cancel")
+def cancel(req: CancelOrderRequest, x_signer_api_key: Optional[str] = Header(default=None)):
+    require_api_key(x_signer_api_key)
+    exchange = get_exchange(req.agent_private_key, req.wallet_address)
+    return exchange.cancel(req.coin, req.oid)
+

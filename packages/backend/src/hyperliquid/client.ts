@@ -1,6 +1,4 @@
 import axios, { AxiosInstance } from 'axios';
-import { ethers, Wallet } from 'ethers';
-import * as msgpack from '@msgpack/msgpack';
 import type {
   MetaResponse,
   UserState,
@@ -28,69 +26,11 @@ function parseAssetConfig(asset: string): { dex: string | null; coin: string; fu
 
 const ASSET_CONFIG = parseAssetConfig(TRADING_ASSET);
 
-/**
- * Sign an L1 action for Hyperliquid using the phantom agent scheme
- * This is used when an agent wallet signs on behalf of a master wallet
- */
-async function signL1Action(
-  wallet: Wallet,
-  action: Record<string, unknown>,
-  activePool: string | null,
-  nonce: number
-): Promise<{ r: string; s: string; v: number }> {
-  // Hyperliquid L1 action signing:
-  // 1. Encode the action as msgpack
-  // 2. Create the phantom agent data structure
-  // 3. Hash it with keccak256
-  // 4. Sign the hash
-
-  // Encode action as msgpack
-  const actionBytes = msgpack.encode(action);
-  const actionHash = ethers.keccak256(actionBytes);
-
-  // Create the phantom agent message
-  // Format: keccak256(actionHash + activePool + nonce)
-  const connectionId = activePool
-    ? ethers.keccak256(ethers.toUtf8Bytes(activePool))
-    : ethers.zeroPadValue('0x00', 32);
-
-  // For phantom agent signing, we sign: keccak256(actionHash || connectionId || nonce as 8 bytes)
-  const nonceBytes = ethers.zeroPadValue(ethers.toBeHex(nonce), 8);
-  const toSign = ethers.keccak256(ethers.concat([actionHash, connectionId, nonceBytes]));
-
-  // Sign the hash
-  const signature = wallet.signingKey.sign(toSign);
-
-  return {
-    r: signature.r,
-    s: signature.s,
-    v: signature.v,
-  };
-}
-
-/**
- * Format a float to a string, removing trailing zeros
- * This is important for Hyperliquid's signature verification
- */
-function floatToWire(x: number): string {
-  const formatted = x.toFixed(8);
-  // Remove trailing zeros but keep at least one decimal place
-  let result = formatted.replace(/\.?0+$/, '');
-  if (!result.includes('.')) {
-    result = formatted.slice(0, formatted.indexOf('.') + 2);
-  }
-  return result;
-}
-
-/**
- * Convert an order type to wire format
- */
-function orderTypeToWire(orderType: 'market' | 'limit', tif: 'Ioc' | 'Gtc' | 'Alo'): { limit: { tif: string } } {
-  return { limit: { tif } };
-}
 
 export class HyperliquidClient {
   private api: AxiosInstance;
+  private signer: AxiosInstance | null = null;
+  private signerApiKey: string | undefined;
   private assetId: number | null = null;
   private assetDecimals: number = 4;
   private assetMaxLeverage: number = 20;
@@ -103,6 +43,30 @@ export class HyperliquidClient {
       headers: { 'Content-Type': 'application/json' },
       timeout: 30000,
     });
+
+    const signerUrl = process.env.SIGNER_URL;
+    this.signerApiKey = process.env.SIGNER_API_KEY;
+    if (signerUrl) {
+      this.signer = axios.create({
+        baseURL: signerUrl,
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 30000,
+      });
+    }
+  }
+
+  private async signerRequest<T>(path: string, payload: Record<string, unknown>): Promise<T> {
+    if (!this.signer) {
+      throw new Error('SIGNER_URL is not configured');
+    }
+
+    const headers: Record<string, string> = {};
+    if (this.signerApiKey) {
+      headers['X-Signer-Api-Key'] = this.signerApiKey;
+    }
+
+    const response = await this.signer.post(path, payload, { headers });
+    return response.data as T;
   }
 
   /**
@@ -261,58 +225,6 @@ export class HyperliquidClient {
   }
 
   /**
-   * Send an L1 action to the exchange with retry logic for rate limiting
-   */
-  private async sendAction(
-    agentPrivateKey: string,
-    walletAddress: string,
-    action: Record<string, unknown>,
-    nonce?: number
-  ): Promise<{ status: string; response: unknown }> {
-    // Ensure private key has 0x prefix
-    const keyWithPrefix = agentPrivateKey.startsWith('0x') ? agentPrivateKey : '0x' + agentPrivateKey;
-    const wallet = new Wallet(keyWithPrefix);
-
-    const maxRetries = 3;
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      // Use fresh timestamp for each attempt
-      const timestamp = nonce || Date.now();
-
-      // Sign the action
-      const signature = await signL1Action(wallet, action, null, timestamp);
-
-      try {
-        // Send to exchange
-        const response = await this.api.post('/exchange', {
-          action,
-          nonce: timestamp,
-          signature,
-          vaultAddress: walletAddress.toLowerCase(), // Trading on behalf of this address
-        });
-
-        console.log(`[Hyperliquid] Action response:`, JSON.stringify(response.data));
-        return response.data;
-      } catch (error: unknown) {
-        const axiosError = error as { response?: { status?: number } };
-        if (axiosError.response?.status === 429) {
-          // Rate limited - exponential backoff
-          const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
-          console.log(`[Hyperliquid] Rate limited, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          lastError = error instanceof Error ? error : new Error('Rate limited');
-        } else {
-          // Other error - don't retry
-          throw error;
-        }
-      }
-    }
-
-    throw lastError || new Error('Max retries exceeded due to rate limiting');
-  }
-
-  /**
    * Update leverage for the trading asset
    */
   async updateLeverage(
@@ -321,15 +233,14 @@ export class HyperliquidClient {
     leverage: number,
     isCross: boolean = false
   ): Promise<void> {
-    const action = {
-      type: 'updateLeverage',
-      asset: this.getAssetId(),
-      isCross,
-      leverage,
-    };
-
     try {
-      await this.sendAction(agentPrivateKey, walletAddress, action);
+      await this.signerRequest('/l1/update_leverage', {
+        agent_private_key: agentPrivateKey,
+        wallet_address: walletAddress,
+        coin: ASSET_CONFIG.fullName,
+        leverage,
+        is_cross: isCross,
+      });
       console.log(`[Hyperliquid] Leverage updated to ${leverage}x`);
     } catch (e) {
       console.log(`[Hyperliquid] Leverage update may have failed:`, e);
@@ -381,26 +292,17 @@ export class HyperliquidClient {
     // Update leverage first (isolated for HIP-3)
     await this.updateLeverage(agentPrivateKey, walletAddress, params.leverage, false);
 
-    // Build the order action
-    // IMPORTANT: Field order matters for msgpack serialization
-    const orderWire = {
-      a: this.getAssetId(), // asset
-      b: params.side === 'long', // is_buy
-      p: floatToWire(orderPrice), // limit_px
-      s: floatToWire(roundedSize), // sz
-      r: false, // reduce_only
-      t: orderTypeToWire(params.orderType, tif), // order_type
-      c: undefined, // cloid (optional client order id)
-    };
-
-    const action = {
-      type: 'order',
-      orders: [orderWire],
-      grouping: 'na',
-    };
-
     try {
-      const result = await this.sendAction(agentPrivateKey, walletAddress, action);
+      const result = await this.signerRequest<OrderResult>('/l1/order', {
+        agent_private_key: agentPrivateKey,
+        wallet_address: walletAddress,
+        coin: ASSET_CONFIG.fullName,
+        is_buy: params.side === 'long',
+        size: roundedSize,
+        limit_px: orderPrice,
+        tif,
+        reduce_only: false,
+      });
 
       if (result.status === 'ok') {
         return { status: 'ok', response: result.response as any };
@@ -426,31 +328,15 @@ export class HyperliquidClient {
     }
 
     const size = Math.abs(parseFloat(position.position.szi));
-    const isLong = parseFloat(position.position.szi) > 0;
-    const midPrice = await this.getGoldPrice();
-
-    // Close in opposite direction with slippage
-    const slippageMultiplier = isLong ? 1 - SLIPPAGE_BPS / 10000 : 1 + SLIPPAGE_BPS / 10000;
-    const closePrice = midPrice * slippageMultiplier;
-
-    const orderWire = {
-      a: this.getAssetId(),
-      b: !isLong, // Opposite direction
-      p: floatToWire(closePrice),
-      s: floatToWire(size),
-      r: true, // reduce_only
-      t: { limit: { tif: 'Ioc' } },
-      c: undefined,
-    };
-
-    const action = {
-      type: 'order',
-      orders: [orderWire],
-      grouping: 'na',
-    };
 
     try {
-      const result = await this.sendAction(agentPrivateKey, walletAddress, action);
+      const result = await this.signerRequest<OrderResult>('/l1/market_close', {
+        agent_private_key: agentPrivateKey,
+        wallet_address: walletAddress,
+        coin: ASSET_CONFIG.fullName,
+        size,
+        slippage: SLIPPAGE_BPS / 10000,
+      });
 
       if (result.status === 'ok') {
         return { status: 'ok', response: result.response as any };
@@ -468,18 +354,13 @@ export class HyperliquidClient {
    * Cancel an order
    */
   async cancelOrder(agentPrivateKey: string, walletAddress: string, orderId: number): Promise<OrderResult> {
-    const action = {
-      type: 'cancel',
-      cancels: [
-        {
-          a: this.getAssetId(),
-          o: orderId,
-        },
-      ],
-    };
-
     try {
-      const result = await this.sendAction(agentPrivateKey, walletAddress, action);
+      const result = await this.signerRequest<OrderResult>('/l1/cancel', {
+        agent_private_key: agentPrivateKey,
+        wallet_address: walletAddress,
+        coin: ASSET_CONFIG.fullName,
+        oid: orderId,
+      });
 
       if (result.status === 'ok') {
         return { status: 'ok', response: result.response as any };
