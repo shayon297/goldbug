@@ -172,6 +172,24 @@ export function registerHandlers(bot: Telegraf) {
     );
   });
 
+  // /debug command - show agent status
+  bot.command('debug', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.replyWithMarkdown('❌ Not connected. Use /start first.');
+      return;
+    }
+
+    await ctx.replyWithMarkdown(
+      `🔧 *Debug Info*\n\n` +
+      `*Wallet:* \`${user.walletAddress}\`\n` +
+      `*Agent:* \`${user.agentAddress}\`\n\n` +
+      `Compare this agent address with what's approved on Hyperliquid.`
+    );
+  });
+
   // /deposit command - funding instructions
   bot.command('deposit', async (ctx) => {
     const telegramId = BigInt(ctx.from.id);
