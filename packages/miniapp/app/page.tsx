@@ -39,6 +39,7 @@ export default function Home() {
   const [bridgeAmount, setBridgeAmount] = useState<string>('');
   const [ethBalance, setEthBalance] = useState<string>('0');
   const [wantsBridge, setWantsBridge] = useState(false);
+  const [wantsReauth, setWantsReauth] = useState(false);
   const checkedUrl = useRef(false);
 
   // Initialize Telegram Web App and check URL params
@@ -47,14 +48,19 @@ export default function Home() {
     const user = getTelegramUser();
     setTelegramUser(user);
 
-    // Check URL params for bridge action
+    // Check URL params for actions
     if (!checkedUrl.current) {
       checkedUrl.current = true;
       const params = new URLSearchParams(window.location.search);
       const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
-      if (params.get('action') === 'bridge' || hashParams.get('action') === 'bridge') {
+      const action = params.get('action') || hashParams.get('action');
+      
+      if (action === 'bridge') {
         console.log('[MiniApp] Bridge action detected');
         setWantsBridge(true);
+      } else if (action === 'reauth') {
+        console.log('[MiniApp] Reauth action detected');
+        setWantsReauth(true);
       }
     }
 
@@ -67,20 +73,22 @@ export default function Home() {
   // Update step based on Privy state
   useEffect(() => {
     if (!ready) return;
-    if (step === 'bridge' || step === 'bridging' || step === 'bridged') return; // Don't override bridge steps
+    if (step === 'bridge' || step === 'bridging' || step === 'bridged' || step === 'registering') return;
 
     if (authenticated && wallets.length > 0) {
-      // If user wants to bridge, go straight there
       if (wantsBridge) {
         console.log('[MiniApp] Going to bridge step');
         setStep('bridge');
+      } else if (wantsReauth) {
+        console.log('[MiniApp] Going to authorize step for reauth');
+        setStep('authorize');
       } else {
         setStep('authorize');
       }
     } else if (!authenticated) {
       setStep('login');
     }
-  }, [ready, authenticated, wallets, wantsBridge, step]);
+  }, [ready, authenticated, wallets, wantsBridge, wantsReauth, step]);
 
   // Handle login
   const handleLogin = useCallback(async () => {
@@ -391,9 +399,13 @@ export default function Home() {
               </svg>
             </div>
 
-            <h2 className="text-xl font-semibold mb-2">Enable Trading</h2>
+            <h2 className="text-xl font-semibold mb-2">
+              {wantsReauth ? 'Re-authorize Agent' : 'Enable Trading'}
+            </h2>
             <p className="text-zinc-400 text-sm mb-6">
-              Authorize the bot to trade on your behalf. You can revoke access anytime.
+              {wantsReauth 
+                ? 'Sign to re-authorize your trading agent on Hyperliquid.'
+                : 'Authorize the bot to trade on your behalf. You can revoke access anytime.'}
             </p>
 
             <div className="bg-zinc-800/50 rounded-lg p-3 mb-6 text-left">

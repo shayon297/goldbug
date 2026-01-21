@@ -201,6 +201,30 @@ export function registerHandlers(bot: Telegraf) {
     );
   });
 
+  // /reauth command - re-authorize agent on Hyperliquid
+  bot.command('reauth', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    await ctx.replyWithMarkdown(
+      `🔑 *Re-authorize Trading Agent*\n\n` +
+      `If your trades are failing, you may need to re-authorize your agent wallet on Hyperliquid.\n\n` +
+      `Tap below to sign the authorization:`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔑 Re-authorize Agent', web_app: { url: `${MINIAPP_URL}?action=reauth` } }],
+          ],
+        },
+      }
+    );
+  });
+
   // /bridge command - one-click bridge to Hyperliquid
   bot.command('bridge', async (ctx) => {
     const telegramId = BigInt(ctx.from.id);
