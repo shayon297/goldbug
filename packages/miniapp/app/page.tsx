@@ -172,14 +172,14 @@ export default function Home() {
       console.log('[MiniApp] Signature:', { r: sig.r, s: sig.s, v: sig.v });
 
       // Send approveAgent to Hyperliquid
-      // Action payload for the API includes 'type' field
-      const apiAction = {
+      // Action payload for the API - Python SDK DELETES agentName if unnamed
+      const apiAction: Record<string, unknown> = {
         type: 'approveAgent',
         hyperliquidChain: 'Mainnet',
         signatureChainId: signatureChainId,
         agentAddress: agentAddress,
-        agentName: null, // API expects null, not empty string
         nonce: nonce,
+        // agentName is NOT included for unnamed agents (Python SDK deletes it)
       };
       
       const requestBody = {
