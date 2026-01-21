@@ -73,7 +73,9 @@ export default function Home() {
   // Update step based on Privy state
   useEffect(() => {
     if (!ready) return;
-    if (step === 'bridge' || step === 'bridging' || step === 'bridged' || step === 'registering') return;
+    // Don't reset these steps - they should persist until user action
+    if (step === 'bridge' || step === 'bridging' || step === 'bridged' || 
+        step === 'registering' || step === 'error' || step === 'success') return;
 
     if (authenticated && wallets.length > 0) {
       if (wantsBridge) {
