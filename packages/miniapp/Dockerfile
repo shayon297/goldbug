@@ -13,6 +13,12 @@ RUN npm ci --workspace=@goldbug/miniapp --include-workspace-root
 FROM base AS builder
 WORKDIR /app
 
+# Build args for Next.js public env vars (needed at build time)
+ARG NEXT_PUBLIC_PRIVY_APP_ID
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_PRIVY_APP_ID=$NEXT_PUBLIC_PRIVY_APP_ID
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 # Copy node_modules from root (npm workspaces installs here)
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
