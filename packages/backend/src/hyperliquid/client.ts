@@ -157,17 +157,15 @@ export class HyperliquidClient {
 
   /**
    * Get user account state (balance, positions)
-   * For HIP-3 perps, we may need to query dex-specific state
+   * NOTE: Always query main perps account (no dex param) for balance.
+   * HIP-3 perps use "dex abstraction" - USDC from main account is available for trading.
    */
   async getUserState(walletAddress: string): Promise<UserState> {
-    const payload: { type: string; user: string; dex?: string } = {
+    // Query main perps account - DO NOT pass dex param for balance
+    const response = await this.api.post('/info', {
       type: 'clearinghouseState',
       user: walletAddress.toLowerCase(),
-    };
-    if (ASSET_CONFIG.dex) {
-      payload.dex = ASSET_CONFIG.dex;
-    }
-    const response = await this.api.post('/info', payload);
+    });
     return response.data;
   }
 
