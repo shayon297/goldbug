@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
-import { Hyperliquid } from 'hyperliquid';
+import { ethers, Wallet } from 'ethers';
+import * as msgpack from '@msgpack/msgpack';
 import type {
   MetaResponse,
   UserState,
@@ -27,6 +28,67 @@ function parseAssetConfig(asset: string): { dex: string | null; coin: string; fu
 
 const ASSET_CONFIG = parseAssetConfig(TRADING_ASSET);
 
+/**
+ * Sign an L1 action for Hyperliquid using the phantom agent scheme
+ * This is used when an agent wallet signs on behalf of a master wallet
+ */
+async function signL1Action(
+  wallet: Wallet,
+  action: Record<string, unknown>,
+  activePool: string | null,
+  nonce: number
+): Promise<{ r: string; s: string; v: number }> {
+  // Hyperliquid L1 action signing:
+  // 1. Encode the action as msgpack
+  // 2. Create the phantom agent data structure
+  // 3. Hash it with keccak256
+  // 4. Sign the hash
+
+  // Encode action as msgpack
+  const actionBytes = msgpack.encode(action);
+  const actionHash = ethers.keccak256(actionBytes);
+
+  // Create the phantom agent message
+  // Format: keccak256(actionHash + activePool + nonce)
+  const connectionId = activePool
+    ? ethers.keccak256(ethers.toUtf8Bytes(activePool))
+    : ethers.zeroPadValue('0x00', 32);
+
+  // For phantom agent signing, we sign: keccak256(actionHash || connectionId || nonce as 8 bytes)
+  const nonceBytes = ethers.zeroPadValue(ethers.toBeHex(nonce), 8);
+  const toSign = ethers.keccak256(ethers.concat([actionHash, connectionId, nonceBytes]));
+
+  // Sign the hash
+  const signature = wallet.signingKey.sign(toSign);
+
+  return {
+    r: signature.r,
+    s: signature.s,
+    v: signature.v,
+  };
+}
+
+/**
+ * Format a float to a string, removing trailing zeros
+ * This is important for Hyperliquid's signature verification
+ */
+function floatToWire(x: number): string {
+  const formatted = x.toFixed(8);
+  // Remove trailing zeros but keep at least one decimal place
+  let result = formatted.replace(/\.?0+$/, '');
+  if (!result.includes('.')) {
+    result = formatted.slice(0, formatted.indexOf('.') + 2);
+  }
+  return result;
+}
+
+/**
+ * Convert an order type to wire format
+ */
+function orderTypeToWire(orderType: 'market' | 'limit', tif: 'Ioc' | 'Gtc' | 'Alo'): { limit: { tif: string } } {
+  return { limit: { tif } };
+}
+
 export class HyperliquidClient {
   private api: AxiosInstance;
   private assetId: number | null = null;
@@ -34,7 +96,6 @@ export class HyperliquidClient {
   private assetMaxLeverage: number = 20;
   private perpDexIndex: number | null = null;
   private indexInMeta: number | null = null;
-  private sdkCache: Map<string, Hyperliquid> = new Map();
 
   constructor(apiUrl: string = 'https://api.hyperliquid.xyz') {
     this.api = axios.create({
@@ -42,27 +103,6 @@ export class HyperliquidClient {
       headers: { 'Content-Type': 'application/json' },
       timeout: 30000,
     });
-  }
-
-  /**
-   * Get or create an SDK instance for the given private key
-   */
-  private async getSDK(privateKey: string, walletAddress: string): Promise<Hyperliquid> {
-    const cacheKey = privateKey.slice(0, 10); // Use partial key for cache
-    
-    if (this.sdkCache.has(cacheKey)) {
-      return this.sdkCache.get(cacheKey)!;
-    }
-
-    const sdk = new Hyperliquid({
-      privateKey,
-      testnet: false,
-      walletAddress, // The main wallet address this agent trades for
-    });
-
-    await sdk.connect();
-    this.sdkCache.set(cacheKey, sdk);
-    return sdk;
   }
 
   /**
@@ -198,7 +238,59 @@ export class HyperliquidClient {
   }
 
   /**
-   * Place an order using the Hyperliquid SDK
+   * Send an L1 action to the exchange
+   */
+  private async sendAction(
+    agentPrivateKey: string,
+    walletAddress: string,
+    action: Record<string, unknown>,
+    nonce?: number
+  ): Promise<{ status: string; response: unknown }> {
+    const wallet = new Wallet(agentPrivateKey);
+    const timestamp = nonce || Date.now();
+
+    // Sign the action
+    const signature = await signL1Action(wallet, action, null, timestamp);
+
+    // Send to exchange
+    const response = await this.api.post('/exchange', {
+      action,
+      nonce: timestamp,
+      signature,
+      vaultAddress: walletAddress.toLowerCase(), // Trading on behalf of this address
+    });
+
+    console.log(`[Hyperliquid] Action response:`, JSON.stringify(response.data));
+    return response.data;
+  }
+
+  /**
+   * Update leverage for the trading asset
+   */
+  async updateLeverage(
+    agentPrivateKey: string,
+    walletAddress: string,
+    leverage: number,
+    isCross: boolean = false
+  ): Promise<void> {
+    const action = {
+      type: 'updateLeverage',
+      asset: this.getAssetId(),
+      isCross,
+      leverage,
+    };
+
+    try {
+      await this.sendAction(agentPrivateKey, walletAddress, action);
+      console.log(`[Hyperliquid] Leverage updated to ${leverage}x`);
+    } catch (e) {
+      console.log(`[Hyperliquid] Leverage update may have failed:`, e);
+      // Non-fatal, continue with order
+    }
+  }
+
+  /**
+   * Place an order using direct L1 action signing
    */
   async placeOrder(
     agentPrivateKey: string,
@@ -209,9 +301,6 @@ export class HyperliquidClient {
     if (params.leverage < 1 || params.leverage > this.assetMaxLeverage) {
       throw new Error(`Leverage must be between 1 and ${this.assetMaxLeverage}`);
     }
-
-    // Get SDK instance
-    const sdk = await this.getSDK(agentPrivateKey, walletAddress);
 
     // Get current price for size calculation and market order pricing
     const midPrice = await this.getGoldPrice();
@@ -226,51 +315,62 @@ export class HyperliquidClient {
 
     // Determine order price
     let orderPrice: number;
+    let tif: 'Ioc' | 'Gtc';
+
     if (params.orderType === 'market') {
-      // Market order: use slippage-adjusted price
+      // Market order: use slippage-adjusted price with IOC
       const slippageMultiplier = params.side === 'long' ? 1 + SLIPPAGE_BPS / 10000 : 1 - SLIPPAGE_BPS / 10000;
       orderPrice = midPrice * slippageMultiplier;
+      tif = 'Ioc';
     } else {
       if (!params.limitPrice) {
         throw new Error('Limit price required for limit orders');
       }
       orderPrice = params.limitPrice;
+      tif = 'Gtc';
     }
+
+    // Update leverage first (isolated for HIP-3)
+    await this.updateLeverage(agentPrivateKey, walletAddress, params.leverage, false);
+
+    // Build the order action
+    // IMPORTANT: Field order matters for msgpack serialization
+    const orderWire = {
+      a: this.getAssetId(), // asset
+      b: params.side === 'long', // is_buy
+      p: floatToWire(orderPrice), // limit_px
+      s: floatToWire(roundedSize), // sz
+      r: false, // reduce_only
+      t: orderTypeToWire(params.orderType, tif), // order_type
+      c: undefined, // cloid (optional client order id)
+    };
+
+    const action = {
+      type: 'order',
+      orders: [orderWire],
+      grouping: 'na',
+    };
 
     try {
-      // Update leverage first
-      await sdk.exchange.updateLeverage(ASSET_CONFIG.fullName, 'isolated', params.leverage);
-    } catch (e) {
-      console.log('[Hyperliquid] Leverage update may have failed, continuing:', e);
-    }
+      const result = await this.sendAction(agentPrivateKey, walletAddress, action);
 
-    // Place the order using SDK
-    const result = await sdk.exchange.placeOrder({
-      coin: ASSET_CONFIG.fullName,
-      is_buy: params.side === 'long',
-      sz: roundedSize,
-      limit_px: orderPrice,
-      order_type: params.orderType === 'market' ? { limit: { tif: 'Ioc' } } : { limit: { tif: 'Gtc' } },
-      reduce_only: false,
-    });
-
-    console.log('[Hyperliquid] Order result:', JSON.stringify(result));
-
-    // Convert SDK response to our format
-    if (result.status === 'ok') {
-      return { status: 'ok', response: result.response as any };
-    } else {
-      return { status: 'err', error: String(result.response) || 'Order failed' };
+      if (result.status === 'ok') {
+        return { status: 'ok', response: result.response as any };
+      } else {
+        const errorMsg = typeof result.response === 'string' ? result.response : JSON.stringify(result.response);
+        return { status: 'err', error: errorMsg || 'Order failed' };
+      }
+    } catch (e: any) {
+      console.error(`[Hyperliquid] Order error:`, e);
+      const errorMsg = e.response?.data?.response || e.message || 'Unknown error';
+      return { status: 'err', error: errorMsg };
     }
   }
 
   /**
    * Close entire position at market
    */
-  async closePosition(
-    agentPrivateKey: string,
-    walletAddress: string
-  ): Promise<OrderResult> {
+  async closePosition(agentPrivateKey: string, walletAddress: string): Promise<OrderResult> {
     const position = await this.getGoldPosition(walletAddress);
 
     if (!position || parseFloat(position.position.szi) === 0) {
@@ -285,54 +385,70 @@ export class HyperliquidClient {
     const slippageMultiplier = isLong ? 1 - SLIPPAGE_BPS / 10000 : 1 + SLIPPAGE_BPS / 10000;
     const closePrice = midPrice * slippageMultiplier;
 
-    // Get SDK instance
-    const sdk = await this.getSDK(agentPrivateKey, walletAddress);
+    const orderWire = {
+      a: this.getAssetId(),
+      b: !isLong, // Opposite direction
+      p: floatToWire(closePrice),
+      s: floatToWire(size),
+      r: true, // reduce_only
+      t: { limit: { tif: 'Ioc' } },
+      c: undefined,
+    };
 
-    const result = await sdk.exchange.placeOrder({
-      coin: ASSET_CONFIG.fullName,
-      is_buy: !isLong,
-      sz: size,
-      limit_px: closePrice,
-      order_type: { limit: { tif: 'Ioc' } },
-      reduce_only: true,
-    });
+    const action = {
+      type: 'order',
+      orders: [orderWire],
+      grouping: 'na',
+    };
 
-    if (result.status === 'ok') {
-      return { status: 'ok', response: result.response as any };
-    } else {
-      return { status: 'err', error: String(result.response) || 'Close failed' };
+    try {
+      const result = await this.sendAction(agentPrivateKey, walletAddress, action);
+
+      if (result.status === 'ok') {
+        return { status: 'ok', response: result.response as any };
+      } else {
+        const errorMsg = typeof result.response === 'string' ? result.response : JSON.stringify(result.response);
+        return { status: 'err', error: errorMsg || 'Close failed' };
+      }
+    } catch (e: any) {
+      const errorMsg = e.response?.data?.response || e.message || 'Unknown error';
+      return { status: 'err', error: errorMsg };
     }
   }
 
   /**
    * Cancel an order
    */
-  async cancelOrder(
-    agentPrivateKey: string,
-    walletAddress: string,
-    orderId: number
-  ): Promise<OrderResult> {
-    const sdk = await this.getSDK(agentPrivateKey, walletAddress);
+  async cancelOrder(agentPrivateKey: string, walletAddress: string, orderId: number): Promise<OrderResult> {
+    const action = {
+      type: 'cancel',
+      cancels: [
+        {
+          a: this.getAssetId(),
+          o: orderId,
+        },
+      ],
+    };
 
-    const result = await sdk.exchange.cancelOrder({
-      coin: ASSET_CONFIG.fullName,
-      o: orderId,
-    });
+    try {
+      const result = await this.sendAction(agentPrivateKey, walletAddress, action);
 
-    if (result.status === 'ok') {
-      return { status: 'ok', response: result.response as any };
-    } else {
-      return { status: 'err', error: String(result.response) || 'Cancel failed' };
+      if (result.status === 'ok') {
+        return { status: 'ok', response: result.response as any };
+      } else {
+        const errorMsg = typeof result.response === 'string' ? result.response : JSON.stringify(result.response);
+        return { status: 'err', error: errorMsg || 'Cancel failed' };
+      }
+    } catch (e: any) {
+      const errorMsg = e.response?.data?.response || e.message || 'Unknown error';
+      return { status: 'err', error: errorMsg };
     }
   }
 
   /**
    * Cancel all orders for the trading asset
    */
-  async cancelAllOrders(
-    agentPrivateKey: string,
-    walletAddress: string
-  ): Promise<OrderResult[]> {
+  async cancelAllOrders(agentPrivateKey: string, walletAddress: string): Promise<OrderResult[]> {
     const orders = await this.getOpenOrders(walletAddress);
     const results: OrderResult[] = [];
 

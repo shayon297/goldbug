@@ -22,14 +22,22 @@ export interface UserWithDecryptedKey {
 }
 
 /**
- * Create a new user with encrypted agent key
+ * Create or update a user with encrypted agent key
+ * Uses upsert to handle re-registration (e.g., when re-authorizing agent)
  */
 export async function createUser(input: CreateUserInput) {
   const encryptedKey = encryptPrivateKey(input.agentPrivateKey);
 
-  return prisma.user.create({
-    data: {
+  return prisma.user.upsert({
+    where: { telegramId: input.telegramId },
+    create: {
       telegramId: input.telegramId,
+      privyUserId: input.privyUserId,
+      walletAddress: input.walletAddress.toLowerCase(),
+      agentAddress: input.agentAddress.toLowerCase(),
+      agentKeyEncrypted: encryptedKey,
+    },
+    update: {
       privyUserId: input.privyUserId,
       walletAddress: input.walletAddress.toLowerCase(),
       agentAddress: input.agentAddress.toLowerCase(),
