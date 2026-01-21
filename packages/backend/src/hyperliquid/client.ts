@@ -254,9 +254,9 @@ export class HyperliquidClient {
 
     // Convert SDK response to our format
     if (result.status === 'ok') {
-      return { status: 'ok', response: result.response };
+      return { status: 'ok', response: result.response as any };
     } else {
-      return { status: 'err', error: result.response || 'Order failed' };
+      return { status: 'err', error: String(result.response) || 'Order failed' };
     }
   }
 
@@ -294,9 +294,9 @@ export class HyperliquidClient {
     });
 
     if (result.status === 'ok') {
-      return { status: 'ok', response: result.response };
+      return { status: 'ok', response: result.response as any };
     } else {
-      return { status: 'err', error: result.response || 'Close failed' };
+      return { status: 'err', error: String(result.response) || 'Close failed' };
     }
   }
 
@@ -316,9 +316,9 @@ export class HyperliquidClient {
     });
 
     if (result.status === 'ok') {
-      return { status: 'ok', response: result.response };
+      return { status: 'ok', response: result.response as any };
     } else {
-      return { status: 'err', error: result.response || 'Cancel failed' };
+      return { status: 'err', error: String(result.response) || 'Cancel failed' };
     }
   }
 
