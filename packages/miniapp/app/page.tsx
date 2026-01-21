@@ -118,57 +118,44 @@ export default function Home() {
 
       // Generate a new agent wallet
       const agentWallet = Wallet.createRandom();
-      const agentAddress = agentWallet.address;
+      const agentAddress = agentWallet.address.toLowerCase(); // MUST be lowercase
       const agentPrivateKey = agentWallet.privateKey;
 
       // Get the Ethereum provider from Privy wallet for signing
       const provider = await embeddedWallet.getEthereumProvider();
       
       // Approve agent on Hyperliquid using EIP-712 typed data signing
+      // Based on official Python SDK: sign_user_signed_action + sign_agent
       const nonce = Date.now();
+      const signatureChainId = '0xa4b1'; // Arbitrum One
       
-      // Hyperliquid approveAgent EIP-712 typed data (L1 signing format)
-      const domain = {
-        name: 'HyperliquidSignTransaction',
-        version: '1',
-        chainId: 42161, // Arbitrum
-        verifyingContract: '0x0000000000000000000000000000000000000000',
-      };
-
-      // Correct types for ApproveAgent action
-      const types = {
-        'HyperliquidTransaction:ApproveAgent': [
-          { name: 'hyperliquidChain', type: 'string' },
-          { name: 'agentAddress', type: 'address' },
-          { name: 'agentName', type: 'string' },
-          { name: 'nonce', type: 'uint64' },
-        ],
-      };
-
-      // EIP-712 message matches the action fields (without type/signatureChainId)
-      const message = {
+      // Build the action - this IS the EIP-712 message (only typed fields are signed)
+      const action = {
         hyperliquidChain: 'Mainnet',
         agentAddress: agentAddress,
         agentName: '',
-        nonce,
+        nonce: nonce,
+        signatureChainId: signatureChainId,
       };
-
-      // Action payload for the API
-      const action = {
-        type: 'approveAgent',
-        hyperliquidChain: 'Mainnet',
-        signatureChainId: '0xa4b1',
-        agentAddress: agentAddress,
-        agentName: null,
-        nonce,
-      };
-
-      // Sign using Privy's embedded wallet
+      
+      // EIP-712 typed data (matches Python SDK user_signed_payload)
       const typedData = {
-        domain,
-        types,
+        domain: {
+          name: 'HyperliquidSignTransaction',
+          version: '1',
+          chainId: parseInt(signatureChainId, 16), // 42161
+          verifyingContract: '0x0000000000000000000000000000000000000000',
+        },
+        types: {
+          'HyperliquidTransaction:ApproveAgent': [
+            { name: 'hyperliquidChain', type: 'string' },
+            { name: 'agentAddress', type: 'address' },
+            { name: 'agentName', type: 'string' },
+            { name: 'nonce', type: 'uint64' },
+          ],
+        },
         primaryType: 'HyperliquidTransaction:ApproveAgent',
-        message,
+        message: action, // The action IS the message
       };
       
       console.log('[MiniApp] Signing typed data:', JSON.stringify(typedData, null, 2));
@@ -183,9 +170,19 @@ export default function Home() {
       console.log('[MiniApp] Signature:', { r: sig.r, s: sig.s, v: sig.v });
 
       // Send approveAgent to Hyperliquid
+      // Action payload for the API includes 'type' field
+      const apiAction = {
+        type: 'approveAgent',
+        hyperliquidChain: 'Mainnet',
+        signatureChainId: signatureChainId,
+        agentAddress: agentAddress,
+        agentName: null, // API expects null, not empty string
+        nonce: nonce,
+      };
+      
       const requestBody = {
-        action,
-        nonce,
+        action: apiAction,
+        nonce: nonce,
         signature: { r: sig.r, s: sig.s, v: sig.v },
       };
       console.log('[MiniApp] Sending to Hyperliquid:', JSON.stringify(requestBody, null, 2));
