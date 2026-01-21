@@ -31,12 +31,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy public folder if it exists
-COPY --from=builder /app/packages/miniapp/public ./public
-
-# Copy standalone output
+# Copy standalone output (preserves monorepo structure)
 COPY --from=builder --chown=nextjs:nodejs /app/packages/miniapp/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/packages/miniapp/.next/static ./.next/static
+
+# Copy static files to the correct location within standalone
+COPY --from=builder --chown=nextjs:nodejs /app/packages/miniapp/.next/static ./packages/miniapp/.next/static
+
+# Copy public folder to the correct location
+COPY --from=builder --chown=nextjs:nodejs /app/packages/miniapp/public ./packages/miniapp/public
 
 USER nextjs
 
@@ -45,4 +47,5 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "server.js"]
+# Server.js is in the packages/miniapp directory due to monorepo structure
+CMD ["node", "packages/miniapp/server.js"]
