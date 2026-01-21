@@ -92,7 +92,9 @@ export class HyperliquidClient {
       }
 
       // Find the asset in meta
-      const assetIndex = meta.universe.findIndex((a) => a.name === ASSET_CONFIG.coin);
+      // For HIP-3 perps, the asset name in meta includes the dex prefix (e.g., "xyz:GOLD")
+      const searchName = ASSET_CONFIG.dex ? ASSET_CONFIG.fullName : ASSET_CONFIG.coin;
+      const assetIndex = meta.universe.findIndex((a) => a.name === searchName);
       if (assetIndex === -1) {
         throw new Error(`${ASSET_CONFIG.fullName} market not found on Hyperliquid`);
       }
