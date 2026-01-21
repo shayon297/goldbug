@@ -154,8 +154,31 @@ export function registerHandlers(bot: Telegraf) {
       `• Your USDC balance appears automatically\n` +
       `• Use /long or /short to open positions\n` +
       `• Trading on Hyperliquid is *gasless* ⚡\n\n` +
-      `💡 *Minimum:* $10 USDC to start trading\n` +
-      `💡 *Bridge:* Use [Arbitrum Bridge](https://bridge.arbitrum.io) if needed`
+      `💡 *Minimum:* $10 USDC to start trading`
+    );
+  });
+
+  // /bridge command - one-click bridge to Hyperliquid
+  bot.command('bridge', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    await ctx.replyWithMarkdown(
+      `🌉 *Bridge USDC to Hyperliquid*\n\n` +
+      `Your wallet:\n\`${user.walletAddress}\`\n\n` +
+      `Tap the button below to bridge your USDC from Arbitrum to Hyperliquid instantly.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🌉 Bridge Now', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+          ],
+        },
+      }
     );
   });
 
