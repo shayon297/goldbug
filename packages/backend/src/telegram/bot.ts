@@ -12,6 +12,7 @@ const BOT_COMMANDS = [
   { command: 'position', description: 'View your current position' },
   { command: 'orders', description: 'View open orders' },
   { command: 'balance', description: 'Check account balance' },
+  { command: 'deposit', description: 'How to fund your wallet' },
   { command: 'close', description: 'Close your position' },
   { command: 'cancel', description: 'Cancel all open orders' },
   { command: 'help', description: 'Show help & commands' },

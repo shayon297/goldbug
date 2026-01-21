@@ -119,13 +119,43 @@ export function registerHandlers(bot: Telegraf) {
       `/balance - Check account balance\n` +
       `/close - Close your position\n` +
       `/cancel - Cancel all orders\n` +
+      `/deposit - How to fund your wallet\n` +
       `/help - Show this help\n\n` +
       `*Quick Commands:*\n` +
       `You can also type natural language:\n` +
       `• "Long 5x $500 market"\n` +
       `• "Short 10x $1000 limit 2800"\n\n` +
-      `*Funding:*\n` +
-      `Deposit USDC via Hyperliquid (Arbitrum) to trade.`
+      `Type /deposit for funding instructions.`
+    );
+  });
+
+  // /deposit command - funding instructions
+  bot.command('deposit', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    let walletInfo = '';
+    if (user) {
+      walletInfo = `\n\n💳 *Your Wallet:*\n\`${user.walletAddress}\`\n`;
+    }
+
+    await ctx.replyWithMarkdown(
+      `💰 *How to Fund Your Wallet*${walletInfo}\n` +
+      `*Step 1: Get USDC on Arbitrum*\n` +
+      `• Buy USDC on an exchange (Coinbase, Binance, etc.)\n` +
+      `• Withdraw to your wallet on *Arbitrum One*\n` +
+      `• Or bridge from another chain to Arbitrum\n\n` +
+      `*Step 2: Deposit to Hyperliquid*\n` +
+      `• Go to [app.hyperliquid.xyz](https://app.hyperliquid.xyz)\n` +
+      `• Connect the same wallet you linked here\n` +
+      `• Click *Deposit* and select USDC amount\n` +
+      `• Confirm the transaction (~$0.01 gas)\n\n` +
+      `*Step 3: Start Trading!*\n` +
+      `• Your USDC balance appears automatically\n` +
+      `• Use /long or /short to open positions\n` +
+      `• Trading on Hyperliquid is *gasless* ⚡\n\n` +
+      `💡 *Minimum:* $10 USDC to start trading\n` +
+      `💡 *Bridge:* Use [Arbitrum Bridge](https://bridge.arbitrum.io) if needed`
     );
   });
 

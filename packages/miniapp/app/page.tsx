@@ -238,14 +238,37 @@ export default function Home() {
                 <p className="text-sm font-mono text-zinc-300 break-all">
                   {registeredWallet}
                 </p>
-                <p className="text-xs text-zinc-500 mt-2">
-                  💡 Fund this wallet with USDC on Hyperliquid to start trading
-                </p>
               </div>
             )}
 
+            {/* Funding Instructions */}
+            <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-4 mb-4 text-left">
+              <p className="text-amber-400 font-semibold text-sm mb-2">💰 Fund Your Wallet</p>
+              <ol className="text-xs text-zinc-300 space-y-2">
+                <li className="flex gap-2">
+                  <span className="text-amber-500 font-bold">1.</span>
+                  <span>Get USDC on <strong>Arbitrum One</strong></span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-amber-500 font-bold">2.</span>
+                  <span>Go to <a href="https://app.hyperliquid.xyz" target="_blank" rel="noopener" className="text-amber-400 underline">app.hyperliquid.xyz</a></span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-amber-500 font-bold">3.</span>
+                  <span>Connect your wallet & click <strong>Deposit</strong></span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-amber-500 font-bold">4.</span>
+                  <span>Deposit USDC from Arbitrum → Hyperliquid</span>
+                </li>
+              </ol>
+              <p className="text-xs text-zinc-500 mt-3">
+                ⚡ Trading on Hyperliquid is gasless after deposit
+              </p>
+            </div>
+
             <p className="text-zinc-400 text-sm mb-4">
-              You can now trade xyz:GOLD in Telegram.
+              Once funded, trade xyz:GOLD in Telegram!
             </p>
 
             <button onClick={() => closeMiniApp()} className="btn-gold w-full">
