@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
+import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { createBot, startBot } from './telegram/bot.js';
 import { prisma, createUser } from './state/db.js';
@@ -15,6 +16,7 @@ import {
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || 'webhook-secret';
+const MINIAPP_URL = process.env.MINIAPP_URL || '';
 
 async function main() {
   console.log('[Server] Starting GOLD Trading Bot...');
@@ -36,6 +38,20 @@ async function main() {
 
   // Security middleware
   app.use(helmet());
+
+  // CORS - allow miniapp to call API
+  const corsOrigins = [
+    MINIAPP_URL,
+    'https://miniapp-production-45a0.up.railway.app',
+    'https://web.telegram.org',
+  ].filter(Boolean);
+  
+  app.use(cors({
+    origin: corsOrigins.length > 0 ? corsOrigins : '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Telegram-Init-Data'],
+    credentials: true,
+  }));
 
   // Rate limiting
   const limiter = rateLimit({
