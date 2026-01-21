@@ -405,13 +405,26 @@ export function registerHandlers(bot: Telegraf) {
       const input = sanitizeInput(ctx.message.text);
       const value = parseFloat(input.replace('$', ''));
 
-      if (!isNaN(value) && value >= 10 && value <= 100000) {
-        session.sizeUsd = value;
-        session.step = 'select_leverage';
-        await updateSession(telegramId, session);
-        await ctx.reply(`Size set to $${value}. Select leverage:`, leverageSelectionKeyboard());
+      if (isNaN(value)) {
+        await ctx.reply('Please enter a valid number (e.g., "$50" or "50")');
         return;
       }
+
+      if (value < 5) {
+        await ctx.reply('Minimum size is $5');
+        return;
+      }
+
+      if (value > 100000) {
+        await ctx.reply('Maximum size is $100,000');
+        return;
+      }
+
+      session.sizeUsd = value;
+      session.step = 'select_leverage';
+      await updateSession(telegramId, session);
+      await ctx.reply(`Size set to $${value}. Select leverage:`, leverageSelectionKeyboard());
+      return;
     }
 
     // Try to parse as natural language trade command
