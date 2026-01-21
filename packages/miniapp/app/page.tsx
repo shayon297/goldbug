@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { Wallet, ethers, Contract, formatUnits, parseUnits } from 'ethers';
 import {
@@ -38,16 +38,25 @@ export default function Home() {
   const [usdcBalance, setUsdcBalance] = useState<string>('0');
   const [bridgeAmount, setBridgeAmount] = useState<string>('');
   const [ethBalance, setEthBalance] = useState<string>('0');
+  const [wantsBridge, setWantsBridge] = useState(false);
+  const checkedUrl = useRef(false);
 
-  // Check URL params once on mount
-  const isBridgeAction = typeof window !== 'undefined' && 
-    new URLSearchParams(window.location.search).get('action') === 'bridge';
-
-  // Initialize Telegram Web App
+  // Initialize Telegram Web App and check URL params
   useEffect(() => {
     expandMiniApp();
     const user = getTelegramUser();
     setTelegramUser(user);
+
+    // Check URL params for bridge action
+    if (!checkedUrl.current) {
+      checkedUrl.current = true;
+      const params = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
+      if (params.get('action') === 'bridge' || hashParams.get('action') === 'bridge') {
+        console.log('[MiniApp] Bridge action detected');
+        setWantsBridge(true);
+      }
+    }
 
     if (!user) {
       setError('Please open this app from Telegram');
@@ -58,11 +67,12 @@ export default function Home() {
   // Update step based on Privy state
   useEffect(() => {
     if (!ready) return;
+    if (step === 'bridge' || step === 'bridging' || step === 'bridged') return; // Don't override bridge steps
 
     if (authenticated && wallets.length > 0) {
-      // If coming from /bridge command, go straight to bridge
-      if (isBridgeAction) {
-        fetchBalances();
+      // If user wants to bridge, go straight there
+      if (wantsBridge) {
+        console.log('[MiniApp] Going to bridge step');
         setStep('bridge');
       } else {
         setStep('authorize');
@@ -70,7 +80,7 @@ export default function Home() {
     } else if (!authenticated) {
       setStep('login');
     }
-  }, [ready, authenticated, wallets, isBridgeAction, fetchBalances]);
+  }, [ready, authenticated, wallets, wantsBridge, step]);
 
   // Handle login
   const handleLogin = useCallback(async () => {
@@ -162,6 +172,13 @@ export default function Home() {
       console.error('Failed to fetch balances:', err);
     }
   }, [wallets]);
+
+  // Auto-fetch balances when entering bridge step
+  useEffect(() => {
+    if (step === 'bridge' && wallets.length > 0) {
+      fetchBalances();
+    }
+  }, [step, wallets, fetchBalances]);
 
   // Handle bridge button click
   const handleBridgeClick = useCallback(async () => {
@@ -323,8 +340,16 @@ export default function Home() {
               </p>
             </div>
 
-            <button onClick={handleAuthorize} className="btn-gold w-full">
+            <button onClick={handleAuthorize} className="btn-gold w-full mb-3">
               Enable Trading
+            </button>
+
+            {/* Direct bridge option for already registered users */}
+            <button 
+              onClick={handleBridgeClick} 
+              className="w-full bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 py-3 rounded-lg font-semibold text-sm transition border border-amber-600/30"
+            >
+              🌉 Already registered? Bridge USDC
             </button>
           </div>
         )}
