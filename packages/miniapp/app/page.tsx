@@ -127,7 +127,9 @@ export default function Home() {
       // Approve agent on Hyperliquid using EIP-712 typed data signing
       // Based on official Python SDK: sign_user_signed_action + sign_agent
       const nonce = Date.now();
-      const signatureChainId = '0xa4b1'; // Arbitrum One
+      // Python SDK uses 0x66eee (Arbitrum Sepolia) for signatureChainId even on mainnet
+      // "signatureChainId is the chain used by the wallet to sign and can be any chain"
+      const signatureChainId = '0x66eee'; // 421614
       
       // Build the action - this IS the EIP-712 message (only typed fields are signed)
       const action = {
