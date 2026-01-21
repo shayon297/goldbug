@@ -1,5 +1,5 @@
 import { Context, Telegraf } from 'telegraf';
-import { Wallet, ethers, Contract } from 'ethers';
+import { ethers, Contract } from 'ethers';
 import {
   mainMenuKeyboard,
   connectWalletKeyboard,
@@ -321,8 +321,7 @@ export function registerHandlers(bot: Telegraf) {
         return;
       }
 
-      const agentWallet = new Wallet(user.agentPrivateKey);
-      await hl.cancelAllOrders(agentWallet, user.walletAddress);
+      await hl.cancelAllOrders(user.agentPrivateKey, user.walletAddress);
       await ctx.reply(`✅ Cancelled ${orders.length} order(s).`, mainMenuKeyboard());
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -579,9 +578,8 @@ export function registerHandlers(bot: Telegraf) {
 
     try {
       const hl = await getHyperliquidClient();
-      const agentWallet = new Wallet(user.agentPrivateKey);
 
-      const result = await hl.placeOrder(agentWallet, {
+      const result = await hl.placeOrder(user.agentPrivateKey, user.walletAddress, {
         side: session.side,
         sizeUsd: session.sizeUsd,
         leverage: session.leverage,
@@ -633,9 +631,8 @@ export function registerHandlers(bot: Telegraf) {
 
     try {
       const hl = await getHyperliquidClient();
-      const agentWallet = new Wallet(user.agentPrivateKey);
 
-      const result = await hl.closePosition(agentWallet, user.walletAddress);
+      const result = await hl.closePosition(user.agentPrivateKey, user.walletAddress);
 
       if (result.status === 'ok') {
         const response = result.response?.data?.statuses[0];
@@ -670,9 +667,8 @@ export function registerHandlers(bot: Telegraf) {
 
     try {
       const hl = await getHyperliquidClient();
-      const agentWallet = new Wallet(user.agentPrivateKey);
 
-      const result = await hl.cancelOrder(agentWallet, orderId);
+      const result = await hl.cancelOrder(user.agentPrivateKey, user.walletAddress, orderId);
 
       if (result.status === 'ok') {
         await ctx.editMessageText(`✅ Order #${orderId} cancelled.`, mainMenuKeyboard());
@@ -821,9 +817,8 @@ async function handleCancelAllOrders(ctx: Context) {
 
   try {
     const hl = await getHyperliquidClient();
-    const agentWallet = new Wallet(user.agentPrivateKey);
 
-    await hl.cancelAllOrders(agentWallet, user.walletAddress);
+    await hl.cancelAllOrders(user.agentPrivateKey, user.walletAddress);
     await ctx.editMessageText('✅ All orders cancelled.', mainMenuKeyboard());
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

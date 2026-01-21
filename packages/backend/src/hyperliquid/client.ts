@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
-import { Wallet, ethers } from 'ethers';
+import { Hyperliquid } from 'hyperliquid';
 import type {
   MetaResponse,
   UserState,
@@ -34,6 +34,7 @@ export class HyperliquidClient {
   private assetMaxLeverage: number = 20;
   private perpDexIndex: number | null = null;
   private indexInMeta: number | null = null;
+  private sdkCache: Map<string, Hyperliquid> = new Map();
 
   constructor(apiUrl: string = 'https://api.hyperliquid.xyz') {
     this.api = axios.create({
@@ -44,76 +45,81 @@ export class HyperliquidClient {
   }
 
   /**
+   * Get or create an SDK instance for the given private key
+   */
+  private async getSDK(privateKey: string, walletAddress: string): Promise<Hyperliquid> {
+    const cacheKey = privateKey.slice(0, 10); // Use partial key for cache
+    
+    if (this.sdkCache.has(cacheKey)) {
+      return this.sdkCache.get(cacheKey)!;
+    }
+
+    const sdk = new Hyperliquid({
+      privateKey,
+      testnet: false,
+      walletAddress, // The main wallet address this agent trades for
+    });
+
+    await sdk.connect();
+    this.sdkCache.set(cacheKey, sdk);
+    return sdk;
+  }
+
+  /**
    * Initialize client by fetching market metadata
    * Supports both native perps and HIP-3 builder perps (xyz:GOLD, etc.)
    */
   async initialize(): Promise<void> {
-    if (ASSET_CONFIG.dex) {
-      // HIP-3 builder perp - query dex-specific meta
-      await this.initializeHIP3Asset();
-    } else {
-      // Native perp - query main meta
-      await this.initializeNativeAsset();
+    try {
+      let meta: MetaResponse;
+
+      if (ASSET_CONFIG.dex) {
+        // For HIP-3 perps, first get perpDexs to find the dex index
+        const perpDexsResponse = await this.api.post('/info', { type: 'perpDexs' });
+        const perpDexs = perpDexsResponse.data as Array<{ name: string } | null>;
+        const dexIndex = perpDexs.findIndex((d) => d && d.name === ASSET_CONFIG.dex);
+
+        if (dexIndex === -1) {
+          throw new Error(`Perp Dex ${ASSET_CONFIG.dex} not found on Hyperliquid`);
+        }
+        this.perpDexIndex = dexIndex;
+
+        // Get meta for the specific dex
+        meta = await this.getMeta(ASSET_CONFIG.dex);
+      } else {
+        // For native perps
+        meta = await this.getMeta();
+      }
+
+      // Find the asset in meta
+      const assetIndex = meta.universe.findIndex((a) => a.name === ASSET_CONFIG.coin);
+      if (assetIndex === -1) {
+        throw new Error(`${ASSET_CONFIG.fullName} market not found on Hyperliquid`);
+      }
+
+      const asset = meta.universe[assetIndex];
+      this.indexInMeta = assetIndex;
+
+      // Calculate asset ID
+      if (ASSET_CONFIG.dex && this.perpDexIndex !== null) {
+        // HIP-3 asset ID formula: 100000 + perp_dex_index * 10000 + index_in_meta
+        this.assetId = 100000 + this.perpDexIndex * 10000 + assetIndex;
+      } else {
+        this.assetId = assetIndex;
+      }
+
+      this.assetDecimals = asset.szDecimals;
+      this.assetMaxLeverage = asset.maxLeverage;
+
+      console.log(
+        `[Hyperliquid] Initialized ${ASSET_CONFIG.dex ? 'HIP-3' : 'native'} asset: ${ASSET_CONFIG.fullName}`,
+        `dexIndex=${this.perpDexIndex}, indexInMeta=${this.indexInMeta}, assetId=${this.assetId},`,
+        `decimals=${this.assetDecimals}, maxLeverage=${this.assetMaxLeverage}`
+      );
+    } catch (error) {
+      console.error(`[Hyperliquid] Failed to initialize: ${error}`);
+      throw error;
     }
-  }
-
-  /**
-   * Initialize HIP-3 builder perp (e.g., xyz:GOLD)
-   */
-  private async initializeHIP3Asset(): Promise<void> {
-    // Get perp dex index from perpDexs response
-    const dexsResponse = await this.api.post('/info', { type: 'perpDexs' });
-    const dexs = dexsResponse.data as (null | { name: string })[];
-    
-    const dexIndex = dexs.findIndex((d) => d && d.name === ASSET_CONFIG.dex);
-    if (dexIndex === -1) {
-      throw new Error(`DEX "${ASSET_CONFIG.dex}" not found on Hyperliquid`);
-    }
-    this.perpDexIndex = dexIndex;
-
-    // Get meta for the specific dex
-    const meta = await this.getMeta();
-    const assetIndex = meta.universe.findIndex((a) => a.name === ASSET_CONFIG.fullName);
-
-    if (assetIndex === -1) {
-      throw new Error(`${ASSET_CONFIG.fullName} not found in ${ASSET_CONFIG.dex} dex`);
-    }
-
-    this.indexInMeta = assetIndex;
-    this.assetDecimals = meta.universe[assetIndex].szDecimals;
-    this.assetMaxLeverage = meta.universe[assetIndex].maxLeverage;
-    
-    // Calculate asset ID for HIP-3 perps: 100000 + perp_dex_index * 10000 + index_in_meta
-    this.assetId = 100000 + this.perpDexIndex * 10000 + this.indexInMeta;
-
-    console.log(
-      `[Hyperliquid] Initialized HIP-3 asset: ${ASSET_CONFIG.fullName} ` +
-      `dexIndex=${this.perpDexIndex}, indexInMeta=${this.indexInMeta}, ` +
-      `assetId=${this.assetId}, decimals=${this.assetDecimals}, maxLeverage=${this.assetMaxLeverage}`
-    );
-  }
-
-  /**
-   * Initialize native perp (BTC, ETH, etc.)
-   */
-  private async initializeNativeAsset(): Promise<void> {
-    const response = await this.api.post('/info', { type: 'meta' });
-    const meta = response.data as MetaResponse;
-    const assetIndex = meta.universe.findIndex((a) => a.name === ASSET_CONFIG.coin);
-
-    if (assetIndex === -1) {
-      throw new Error(`${ASSET_CONFIG.coin} not found on Hyperliquid`);
-    }
-
-    this.assetId = assetIndex;
-    this.indexInMeta = assetIndex;
-    this.assetDecimals = meta.universe[assetIndex].szDecimals;
-    this.assetMaxLeverage = meta.universe[assetIndex].maxLeverage;
-
-    console.log(
-      `[Hyperliquid] Initialized native asset: ${ASSET_CONFIG.coin} ` +
-      `assetId=${this.assetId}, decimals=${this.assetDecimals}, maxLeverage=${this.assetMaxLeverage}`
-    );
   }
 
   private getAssetId(): number {
@@ -125,28 +131,22 @@ export class HyperliquidClient {
 
   /**
    * Fetch market metadata
-   * For HIP-3 perps, queries the specific dex
    */
-  async getMeta(): Promise<MetaResponse> {
-    const payload: { type: string; dex?: string } = { type: 'meta' };
-    if (ASSET_CONFIG.dex) {
-      payload.dex = ASSET_CONFIG.dex;
-    }
-    const response = await this.api.post('/info', payload);
+  async getMeta(dex?: string): Promise<MetaResponse> {
+    const response = await this.api.post('/info', { type: 'meta', ...(dex && { dex }) });
     return response.data;
   }
 
   /**
-   * Get current asset mid price
+   * Get current price for the configured trading asset
    */
   async getGoldPrice(): Promise<number> {
-    const payload: { type: string; dex?: string } = { type: 'allMids' };
-    if (ASSET_CONFIG.dex) {
-      payload.dex = ASSET_CONFIG.dex;
-    }
-    const response = await this.api.post('/info', payload);
+    const response = await this.api.post('/info', {
+      type: 'allMids',
+      ...(ASSET_CONFIG.dex && { dex: ASSET_CONFIG.dex }),
+    });
     const mids = response.data as Record<string, string>;
-    const price = mids[ASSET_CONFIG.fullName];
+    const price = mids[ASSET_CONFIG.coin];
 
     if (!price) {
       throw new Error(`${ASSET_CONFIG.fullName} price not available`);
@@ -194,35 +194,20 @@ export class HyperliquidClient {
   }
 
   /**
-   * Update leverage for the configured asset
-   * Note: HIP-3 perps are isolated-only, so isCross is forced to false
+   * Place an order using the Hyperliquid SDK
    */
-  async updateLeverage(agentWallet: Wallet, leverage: number, isCross: boolean = false): Promise<void> {
-    if (leverage < 1 || leverage > this.assetMaxLeverage) {
-      throw new Error(`Leverage must be between 1 and ${this.assetMaxLeverage}`);
-    }
-
-    // HIP-3 perps require isolated margin mode
-    const useIsolated = ASSET_CONFIG.dex ? false : isCross;
-
-    const action = {
-      type: 'updateLeverage',
-      asset: this.getAssetId(),
-      isCross: useIsolated,
-      leverage,
-    };
-
-    await this.sendAction(agentWallet, action);
-  }
-
-  /**
-   * Place an order for the configured trading asset
-   */
-  async placeOrder(agentWallet: Wallet, params: PlaceOrderParams): Promise<OrderResult> {
+  async placeOrder(
+    agentPrivateKey: string,
+    walletAddress: string,
+    params: PlaceOrderParams
+  ): Promise<OrderResult> {
     // Validate leverage
     if (params.leverage < 1 || params.leverage > this.assetMaxLeverage) {
       throw new Error(`Leverage must be between 1 and ${this.assetMaxLeverage}`);
     }
+
+    // Get SDK instance
+    const sdk = await this.getSDK(agentPrivateKey, walletAddress);
 
     // Get current price for size calculation and market order pricing
     const midPrice = await this.getGoldPrice();
@@ -248,32 +233,40 @@ export class HyperliquidClient {
       orderPrice = params.limitPrice;
     }
 
-    // Update leverage first
-    await this.updateLeverage(agentWallet, params.leverage);
+    try {
+      // Update leverage first
+      await sdk.exchange.updateLeverage(ASSET_CONFIG.fullName, 'isolated', params.leverage);
+    } catch (e) {
+      console.log('[Hyperliquid] Leverage update may have failed, continuing:', e);
+    }
 
-    // Place the order
-    const action = {
-      type: 'order',
-      orders: [
-        {
-          a: this.getAssetId(),
-          b: params.side === 'long',
-          p: this.formatPrice(orderPrice),
-          s: roundedSize.toString(),
-          r: false, // Not reduce-only
-          t: params.orderType === 'market' ? { limit: { tif: 'Ioc' } } : { limit: { tif: 'Gtc' } },
-        },
-      ],
-      grouping: 'na',
-    };
+    // Place the order using SDK
+    const result = await sdk.exchange.placeOrder({
+      coin: ASSET_CONFIG.fullName,
+      is_buy: params.side === 'long',
+      sz: roundedSize,
+      limit_px: orderPrice,
+      order_type: params.orderType === 'market' ? { limit: { tif: 'Ioc' } } : { limit: { tif: 'Gtc' } },
+      reduce_only: false,
+    });
 
-    return this.sendAction(agentWallet, action);
+    console.log('[Hyperliquid] Order result:', JSON.stringify(result));
+
+    // Convert SDK response to our format
+    if (result.status === 'ok') {
+      return { status: 'ok', response: result.response };
+    } else {
+      return { status: 'err', error: result.response || 'Order failed' };
+    }
   }
 
   /**
    * Close entire position at market
    */
-  async closePosition(agentWallet: Wallet, walletAddress: string): Promise<OrderResult> {
+  async closePosition(
+    agentPrivateKey: string,
+    walletAddress: string
+  ): Promise<OrderResult> {
     const position = await this.getGoldPosition(walletAddress);
 
     if (!position || parseFloat(position.position.szi) === 0) {
@@ -288,120 +281,72 @@ export class HyperliquidClient {
     const slippageMultiplier = isLong ? 1 - SLIPPAGE_BPS / 10000 : 1 + SLIPPAGE_BPS / 10000;
     const closePrice = midPrice * slippageMultiplier;
 
-    const action = {
-      type: 'order',
-      orders: [
-        {
-          a: this.getAssetId(),
-          b: !isLong, // Opposite direction to close
-          p: this.formatPrice(closePrice),
-          s: size.toString(),
-          r: true, // Reduce-only
-          t: { limit: { tif: 'Ioc' } },
-        },
-      ],
-      grouping: 'na',
-    };
+    // Get SDK instance
+    const sdk = await this.getSDK(agentPrivateKey, walletAddress);
 
-    return this.sendAction(agentWallet, action);
+    const result = await sdk.exchange.placeOrder({
+      coin: ASSET_CONFIG.fullName,
+      is_buy: !isLong,
+      sz: size,
+      limit_px: closePrice,
+      order_type: { limit: { tif: 'Ioc' } },
+      reduce_only: true,
+    });
+
+    if (result.status === 'ok') {
+      return { status: 'ok', response: result.response };
+    } else {
+      return { status: 'err', error: result.response || 'Close failed' };
+    }
   }
 
   /**
-   * Cancel a specific order
+   * Cancel an order
    */
-  async cancelOrder(agentWallet: Wallet, orderId: number): Promise<OrderResult> {
-    const action = {
-      type: 'cancel',
-      cancels: [
-        {
-          a: this.getAssetId(),
-          o: orderId,
-        },
-      ],
-    };
+  async cancelOrder(
+    agentPrivateKey: string,
+    walletAddress: string,
+    orderId: number
+  ): Promise<OrderResult> {
+    const sdk = await this.getSDK(agentPrivateKey, walletAddress);
 
-    return this.sendAction(agentWallet, action);
+    const result = await sdk.exchange.cancelOrder({
+      coin: ASSET_CONFIG.fullName,
+      o: orderId,
+    });
+
+    if (result.status === 'ok') {
+      return { status: 'ok', response: result.response };
+    } else {
+      return { status: 'err', error: result.response || 'Cancel failed' };
+    }
   }
 
   /**
-   * Cancel all GOLD orders
+   * Cancel all orders for the trading asset
    */
-  async cancelAllOrders(agentWallet: Wallet, walletAddress: string): Promise<OrderResult[]> {
+  async cancelAllOrders(
+    agentPrivateKey: string,
+    walletAddress: string
+  ): Promise<OrderResult[]> {
     const orders = await this.getOpenOrders(walletAddress);
     const results: OrderResult[] = [];
 
     for (const order of orders) {
-      const result = await this.cancelOrder(agentWallet, order.oid);
-      results.push(result);
+      try {
+        const result = await this.cancelOrder(agentPrivateKey, walletAddress, order.oid);
+        results.push(result);
+      } catch (e) {
+        results.push({ status: 'err', error: String(e) });
+      }
     }
 
     return results;
   }
 
-  /**
-   * Send a signed action to Hyperliquid exchange
-   */
-  private async sendAction(agentWallet: Wallet, action: Record<string, unknown>): Promise<OrderResult> {
-    const nonce = Date.now();
-    const signature = await this.signL1Action(agentWallet, action, nonce);
-
-    const response = await this.api.post('/exchange', {
-      action,
-      nonce,
-      signature,
-      vaultAddress: null,
-    });
-
-    return response.data;
-  }
-
-  /**
-   * Sign an L1 action using the agent wallet
-   * Based on Hyperliquid's signing requirements
-   */
-  private async signL1Action(
-    wallet: Wallet,
-    action: Record<string, unknown>,
-    nonce: number
-  ): Promise<{ r: string; s: string; v: number }> {
-    // Hyperliquid uses a specific phantom agent signing scheme
-    const connectionId = ethers.keccak256(ethers.toUtf8Bytes('hyperliquid'));
-
-    // Create the action hash
-    const actionHash = this.hashAction(action, nonce);
-
-    // Sign with EIP-191 personal sign
-    const message = ethers.getBytes(actionHash);
-    const signature = await wallet.signMessage(message);
-
-    // Parse signature
-    const sig = ethers.Signature.from(signature);
-
-    return {
-      r: sig.r,
-      s: sig.s,
-      v: sig.v,
-    };
-  }
-
-  /**
-   * Hash action for signing (simplified - real implementation needs msgpack)
-   */
-  private hashAction(action: Record<string, unknown>, nonce: number): string {
-    // In production, this should use msgpack encoding as per Hyperliquid SDK
-    // For now, using a simplified JSON-based hash
-    const payload = JSON.stringify({ action, nonce });
-    return ethers.keccak256(ethers.toUtf8Bytes(payload));
-  }
-
   private roundToDecimals(value: number, decimals: number): number {
     const factor = Math.pow(10, decimals);
     return Math.floor(value * factor) / factor;
-  }
-
-  private formatPrice(price: number): string {
-    // Hyperliquid prices need specific formatting
-    return price.toFixed(1);
   }
 }
 
@@ -410,10 +355,8 @@ let clientInstance: HyperliquidClient | null = null;
 
 export async function getHyperliquidClient(): Promise<HyperliquidClient> {
   if (!clientInstance) {
-    const apiUrl = process.env.HYPERLIQUID_API_URL || 'https://api.hyperliquid.xyz';
-    clientInstance = new HyperliquidClient(apiUrl);
+    clientInstance = new HyperliquidClient();
     await clientInstance.initialize();
   }
   return clientInstance;
 }
-

@@ -111,6 +111,68 @@ export default function Home() {
       const agentAddress = agentWallet.address;
       const agentPrivateKey = agentWallet.privateKey;
 
+      // Get the Ethereum provider from Privy wallet for signing
+      const provider = await embeddedWallet.getEthereumProvider();
+      
+      // Approve agent on Hyperliquid using EIP-712 typed data signing
+      const nonce = Date.now();
+      
+      // Hyperliquid approveAgent EIP-712 typed data
+      const domain = {
+        name: 'HyperliquidSignTransaction',
+        version: '1',
+        chainId: 42161, // Arbitrum
+        verifyingContract: '0x0000000000000000000000000000000000000000',
+      };
+
+      const types = {
+        HyperliquidTransaction: [
+          { name: 'action', type: 'string' },
+          { name: 'nonce', type: 'uint64' },
+        ],
+      };
+
+      const action = {
+        type: 'approveAgent',
+        hyperliquidChain: 'Mainnet',
+        signatureChainId: '0xa4b1',
+        agentAddress: agentAddress.toLowerCase(),
+        agentName: null,
+        nonce,
+      };
+
+      const message = {
+        action: JSON.stringify(action),
+        nonce,
+      };
+
+      // Sign using Privy's embedded wallet
+      const signature = await provider.request({
+        method: 'eth_signTypedData_v4',
+        params: [embeddedWallet.address, JSON.stringify({ domain, types, primaryType: 'HyperliquidTransaction', message })],
+      });
+
+      // Parse signature
+      const sig = ethers.Signature.from(signature as string);
+
+      // Send approveAgent to Hyperliquid
+      const hlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          nonce,
+          signature: { r: sig.r, s: sig.s, v: sig.v },
+        }),
+      });
+
+      const hlResult = await hlResponse.json();
+      console.log('[Hyperliquid] approveAgent result:', hlResult);
+
+      if (hlResult.status === 'err') {
+        throw new Error(hlResult.response || 'Failed to approve agent on Hyperliquid');
+      }
+
       // Get Privy access token
       const accessToken = await getAccessToken();
       if (!accessToken) {
@@ -145,6 +207,7 @@ export default function Home() {
       setStep('success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[Authorize] Error:', err);
       setError(message);
       setStep('error');
     }
