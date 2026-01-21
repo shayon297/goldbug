@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
-import { Wallet, ethers } from 'ethers';
+import { Wallet, ethers, Contract, formatUnits, parseUnits } from 'ethers';
 import {
   getTelegramUser,
   getTelegramInitData,
@@ -12,7 +12,20 @@ import {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
-type Step = 'init' | 'login' | 'authorize' | 'registering' | 'success' | 'error';
+// Arbitrum USDC and Hyperliquid Bridge
+const ARBITRUM_RPC = 'https://arb1.arbitrum.io/rpc';
+const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // Native USDC on Arbitrum
+const HYPERLIQUID_BRIDGE = '0x2Df1c51E09aECF9cacB7bc98cB1742757f163dF7';
+
+const ERC20_ABI = [
+  'function balanceOf(address) view returns (uint256)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'function transfer(address to, uint256 amount) returns (bool)',
+  'function decimals() view returns (uint8)',
+];
+
+type Step = 'init' | 'login' | 'authorize' | 'registering' | 'success' | 'bridge' | 'bridging' | 'bridged' | 'error';
 
 export default function Home() {
   const { ready, authenticated, login, getAccessToken } = usePrivy();
@@ -22,6 +35,9 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [telegramUser, setTelegramUser] = useState<{ id: number; firstName: string } | null>(null);
   const [registeredWallet, setRegisteredWallet] = useState<string | null>(null);
+  const [usdcBalance, setUsdcBalance] = useState<string>('0');
+  const [bridgeAmount, setBridgeAmount] = useState<string>('');
+  const [ethBalance, setEthBalance] = useState<string>('0');
 
   // Initialize Telegram Web App
   useEffect(() => {
@@ -113,6 +129,106 @@ export default function Home() {
       setStep('error');
     }
   }, [telegramUser, wallets, getAccessToken]);
+
+  // Fetch Arbitrum balances
+  const fetchBalances = useCallback(async () => {
+    if (wallets.length === 0) return;
+    
+    const embeddedWallet = wallets.find((w) => w.walletClientType === 'privy');
+    if (!embeddedWallet) return;
+
+    try {
+      const provider = new ethers.JsonRpcProvider(ARBITRUM_RPC);
+      const usdc = new Contract(USDC_ADDRESS, ERC20_ABI, provider);
+      
+      const [usdcBal, ethBal] = await Promise.all([
+        usdc.balanceOf(embeddedWallet.address),
+        provider.getBalance(embeddedWallet.address),
+      ]);
+      
+      setUsdcBalance(formatUnits(usdcBal, 6));
+      setEthBalance(formatUnits(ethBal, 18));
+    } catch (err) {
+      console.error('Failed to fetch balances:', err);
+    }
+  }, [wallets]);
+
+  // Handle bridge button click
+  const handleBridgeClick = useCallback(async () => {
+    await fetchBalances();
+    setStep('bridge');
+  }, [fetchBalances]);
+
+  // Handle bridge execution
+  const handleBridge = useCallback(async () => {
+    if (!bridgeAmount || wallets.length === 0) return;
+    
+    const amount = parseFloat(bridgeAmount);
+    if (isNaN(amount) || amount < 5) {
+      setError('Minimum bridge amount is 5 USDC');
+      return;
+    }
+
+    const embeddedWallet = wallets.find((w) => w.walletClientType === 'privy');
+    if (!embeddedWallet) {
+      setError('No wallet found');
+      return;
+    }
+
+    setStep('bridging');
+    setError(null);
+
+    try {
+      // Get the Ethereum provider from Privy wallet
+      const provider = await embeddedWallet.getEthereumProvider();
+      const ethersProvider = new ethers.BrowserProvider(provider);
+      const signer = await ethersProvider.getSigner();
+
+      // Switch to Arbitrum if needed
+      try {
+        await provider.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0xa4b1' }], // Arbitrum One
+        });
+      } catch (switchError: any) {
+        // Chain not added, try to add it
+        if (switchError.code === 4902) {
+          await provider.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: '0xa4b1',
+              chainName: 'Arbitrum One',
+              nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+              rpcUrls: ['https://arb1.arbitrum.io/rpc'],
+              blockExplorerUrls: ['https://arbiscan.io'],
+            }],
+          });
+        }
+      }
+
+      const usdc = new Contract(USDC_ADDRESS, ERC20_ABI, signer);
+      const amountWei = parseUnits(bridgeAmount, 6);
+
+      // Check allowance
+      const allowance = await usdc.allowance(embeddedWallet.address, HYPERLIQUID_BRIDGE);
+      
+      if (allowance < amountWei) {
+        // Approve USDC spending
+        const approveTx = await usdc.approve(HYPERLIQUID_BRIDGE, amountWei);
+        await approveTx.wait();
+      }
+
+      // Transfer USDC to bridge
+      const transferTx = await usdc.transfer(HYPERLIQUID_BRIDGE, amountWei);
+      await transferTx.wait();
+
+      setStep('bridged');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Bridge failed';
+      setError(message);
+      setStep('bridge');
+    }
+  }, [bridgeAmount, wallets]);
 
   // Render loading state
   if (!ready || step === 'init') {
@@ -241,34 +357,134 @@ export default function Home() {
               </div>
             )}
 
-            {/* Funding Instructions */}
+            {/* One-Click Bridge */}
             <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-4 mb-4 text-left">
               <p className="text-amber-400 font-semibold text-sm mb-2">💰 Fund Your Wallet</p>
-              <ol className="text-xs text-zinc-300 space-y-2">
-                <li className="flex gap-2">
-                  <span className="text-amber-500 font-bold">1.</span>
-                  <span>Get USDC on <strong>Arbitrum One</strong></span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="text-amber-500 font-bold">2.</span>
-                  <span>Go to <a href="https://app.hyperliquid.xyz" target="_blank" rel="noopener" className="text-amber-400 underline">app.hyperliquid.xyz</a></span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="text-amber-500 font-bold">3.</span>
-                  <span>Connect your wallet & click <strong>Deposit</strong></span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="text-amber-500 font-bold">4.</span>
-                  <span>Deposit USDC from Arbitrum → Hyperliquid</span>
-                </li>
-              </ol>
-              <p className="text-xs text-zinc-500 mt-3">
-                ⚡ Trading on Hyperliquid is gasless after deposit
+              <p className="text-xs text-zinc-300 mb-3">
+                Have USDC on Arbitrum? Bridge directly to Hyperliquid:
+              </p>
+              <button 
+                onClick={handleBridgeClick} 
+                className="w-full bg-amber-600 hover:bg-amber-500 text-white py-2 px-4 rounded-lg font-semibold text-sm transition"
+              >
+                🌉 Bridge USDC to Hyperliquid
+              </button>
+              <p className="text-xs text-zinc-500 mt-2">
+                Requires USDC + small ETH for gas on Arbitrum
               </p>
             </div>
 
             <p className="text-zinc-400 text-sm mb-4">
               Once funded, trade xyz:GOLD in Telegram!
+            </p>
+
+            <button onClick={() => closeMiniApp()} className="btn-gold w-full">
+              Return to Telegram
+            </button>
+          </div>
+        )}
+
+        {/* Bridge Step */}
+        {step === 'bridge' && (
+          <div className="text-center">
+            <div className="w-16 h-16 bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-3xl">🌉</span>
+            </div>
+
+            <h2 className="text-xl font-semibold mb-2">Bridge USDC</h2>
+            <p className="text-zinc-400 text-sm mb-4">
+              Send USDC from Arbitrum to Hyperliquid
+            </p>
+
+            {/* Balances */}
+            <div className="bg-zinc-800/50 rounded-lg p-3 mb-4 text-left">
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-zinc-500">USDC Balance</span>
+                <span className="text-zinc-200 font-mono">{parseFloat(usdcBalance).toFixed(2)} USDC</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-zinc-500">ETH for Gas</span>
+                <span className="text-zinc-200 font-mono">{parseFloat(ethBalance).toFixed(4)} ETH</span>
+              </div>
+            </div>
+
+            {/* Amount Input */}
+            <div className="mb-4">
+              <label className="block text-xs text-zinc-500 mb-1 text-left">Amount to Bridge</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={bridgeAmount}
+                  onChange={(e) => setBridgeAmount(e.target.value)}
+                  placeholder="100"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500"
+                />
+                <button
+                  onClick={() => setBridgeAmount(usdcBalance)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-amber-400 hover:text-amber-300"
+                >
+                  MAX
+                </button>
+              </div>
+              <p className="text-xs text-zinc-500 mt-1 text-left">Minimum: 5 USDC</p>
+            </div>
+
+            {error && (
+              <p className="text-red-400 text-sm mb-4">{error}</p>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setStep('success'); setError(null); }}
+                className="flex-1 bg-zinc-700 hover:bg-zinc-600 text-white py-3 rounded-lg font-semibold transition"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleBridge}
+                disabled={!bridgeAmount || parseFloat(bridgeAmount) < 5}
+                className="flex-1 bg-amber-600 hover:bg-amber-500 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white py-3 rounded-lg font-semibold transition"
+              >
+                Bridge
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Bridging Step */}
+        {step === 'bridging' && (
+          <div className="text-center py-8">
+            <div className="spinner mx-auto mb-4" />
+            <p className="text-zinc-400 mb-2">Bridging USDC...</p>
+            <p className="text-xs text-zinc-500">Approve the transaction in your wallet</p>
+          </div>
+        )}
+
+        {/* Bridged Success Step */}
+        {step === 'bridged' && (
+          <div className="text-center">
+            <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg
+                className="w-8 h-8 text-green-500"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+            </div>
+
+            <h2 className="text-xl font-semibold mb-2 text-green-500">Bridged!</h2>
+            <p className="text-zinc-400 text-sm mb-2">
+              {bridgeAmount} USDC sent to Hyperliquid
+            </p>
+            <p className="text-xs text-zinc-500 mb-6">
+              Funds will appear in ~1 minute. You can start trading!
             </p>
 
             <button onClick={() => closeMiniApp()} className="btn-gold w-full">
