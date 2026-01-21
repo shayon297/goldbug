@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { ethers } from 'ethers';
 import { encryptPrivateKey, decryptPrivateKey } from './crypto.js';
 
 export const prisma = new PrismaClient();
@@ -48,6 +49,7 @@ export async function createUser(input: CreateUserInput) {
 
 /**
  * Get user by Telegram ID with decrypted agent key
+ * Validates that the decrypted key matches the stored address
  */
 export async function getUserByTelegramId(telegramId: bigint): Promise<UserWithDecryptedKey | null> {
   const user = await prisma.user.findUnique({
@@ -56,12 +58,26 @@ export async function getUserByTelegramId(telegramId: bigint): Promise<UserWithD
 
   if (!user) return null;
 
+  // Decrypt the agent private key
+  const decryptedKey = decryptPrivateKey(user.agentKeyEncrypted);
+  
+  // Ensure the key has 0x prefix for ethers
+  const keyWithPrefix = decryptedKey.startsWith('0x') ? decryptedKey : '0x' + decryptedKey;
+  
+  // Validate that the decrypted key matches the stored agent address
+  const derivedAddress = ethers.computeAddress(keyWithPrefix).toLowerCase();
+  if (derivedAddress !== user.agentAddress.toLowerCase()) {
+    console.error(`[DB] Key mismatch for user ${telegramId}: stored=${user.agentAddress}, derived=${derivedAddress}`);
+    // Return null to force re-registration - the stored data is corrupted
+    return null;
+  }
+
   return {
     telegramId: user.telegramId,
     privyUserId: user.privyUserId,
     walletAddress: user.walletAddress,
     agentAddress: user.agentAddress,
-    agentPrivateKey: decryptPrivateKey(user.agentKeyEncrypted),
+    agentPrivateKey: keyWithPrefix, // Always return with 0x prefix
     defaultLeverage: user.defaultLeverage,
     defaultSizeUsd: user.defaultSizeUsd,
   };

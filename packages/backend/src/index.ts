@@ -3,6 +3,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import { ethers } from 'ethers';
 import { createBot, startBot } from './telegram/bot.js';
 import { prisma, createUser } from './state/db.js';
 import { getHyperliquidClient } from './hyperliquid/client.js';
@@ -121,15 +122,24 @@ async function main() {
         }
       }
 
-      // Create user in database
+      // Ensure private key has 0x prefix for consistency
+      const keyWithPrefix = agentPrivateKey.startsWith('0x') ? agentPrivateKey : '0x' + agentPrivateKey;
+
+      // Validate that the private key produces the claimed address
+      const derivedAddress = ethers.computeAddress(keyWithPrefix);
+      if (derivedAddress.toLowerCase() !== agentAddress.toLowerCase()) {
+        console.error(`[Register] Key/address mismatch: claimed=${agentAddress}, derived=${derivedAddress}`);
+        res.status(400).json({ error: 'Agent key/address mismatch' });
+        return;
+      }
+
+      // Create user in database (store key WITH 0x prefix)
       const user = await createUser({
         telegramId: BigInt(telegramUserId),
         privyUserId: privyUser.privyUserId,
         walletAddress: privyUser.walletAddress,
         agentAddress: agentAddress,
-        agentPrivateKey: agentPrivateKey.startsWith('0x')
-          ? agentPrivateKey.slice(2)
-          : agentPrivateKey,
+        agentPrivateKey: keyWithPrefix,
       });
 
       console.log(`[Register] User ${telegramUserId} registered with wallet ${privyUser.walletAddress}`);

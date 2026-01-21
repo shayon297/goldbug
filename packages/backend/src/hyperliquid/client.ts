@@ -246,7 +246,9 @@ export class HyperliquidClient {
     action: Record<string, unknown>,
     nonce?: number
   ): Promise<{ status: string; response: unknown }> {
-    const wallet = new Wallet(agentPrivateKey);
+    // Ensure private key has 0x prefix
+    const keyWithPrefix = agentPrivateKey.startsWith('0x') ? agentPrivateKey : '0x' + agentPrivateKey;
+    const wallet = new Wallet(keyWithPrefix);
     const timestamp = nonce || Date.now();
 
     // Sign the action
