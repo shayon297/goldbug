@@ -34,17 +34,19 @@ def require_api_key(x_signer_api_key: Optional[str]) -> None:
 def get_exchange(agent_private_key: str, wallet_address: str) -> Exchange:
     key = ensure_hex_prefix(agent_private_key)
     wallet = Account.from_key(key)
-    vault_address = wallet_address.lower()
+    account_address = wallet_address.lower()
 
     perp_dexs = None
     if PERP_DEX:
         # Include builder perp dex for HIP-3 assets
         perp_dexs = ["", PERP_DEX]
 
+    # Use account_address for normal trading. vault_address should only be set
+    # when trading on behalf of a vault account (not the default flow).
     return Exchange(
         wallet=wallet,
         base_url=API_URL,
-        vault_address=vault_address,
+        account_address=account_address,
         perp_dexs=perp_dexs,
         timeout=30,
     )
