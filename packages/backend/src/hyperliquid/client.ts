@@ -203,10 +203,25 @@ export class HyperliquidClient {
   }
 
   /**
+   * Get user state for positions (HIP-3 perps require dex param for positions)
+   */
+  async getUserStateForPositions(walletAddress: string): Promise<UserState> {
+    if (ASSET_CONFIG.dex) {
+      return this.infoRequest<UserState>({
+        type: 'clearinghouseState',
+        user: walletAddress.toLowerCase(),
+        dex: ASSET_CONFIG.dex,
+      });
+    }
+
+    return this.getUserState(walletAddress);
+  }
+
+  /**
    * Get position for the configured trading asset
    */
   async getGoldPosition(walletAddress: string): Promise<AssetPosition | null> {
-    const state = await this.getUserState(walletAddress);
+    const state = await this.getUserStateForPositions(walletAddress);
     return state.assetPositions.find((p) => p.position.coin === ASSET_CONFIG.fullName) || null;
   }
 
