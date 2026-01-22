@@ -52,17 +52,26 @@ export function parseTradeCommand(text: string): ParseResult {
   }
 
   // Extract size (e.g., "$1000", "1000", "$500")
-  const sizeMatch = normalized.match(/\$?(\d+(?:\.\d{1,2})?)/g);
+  const sizeMatch = normalized.match(/\$?\d+(?:\.\d{1,2})?/g);
   let sizeUsd: number | null = null;
 
   if (sizeMatch) {
-    // Find the size value (skip leverage number)
-    for (const match of sizeMatch) {
-      const value = parseFloat(match.replace('$', ''));
-      if (value > 20) {
-        // Likely a size, not leverage
-        sizeUsd = value;
-        break;
+    // Prefer explicitly $-prefixed values
+    const dollarValue = sizeMatch.find((match) => match.startsWith('$'));
+    if (dollarValue) {
+      sizeUsd = parseFloat(dollarValue.replace('$', ''));
+    } else {
+      // Otherwise pick a value that is not the leverage
+      for (const match of sizeMatch) {
+        const value = parseFloat(match.replace('$', ''));
+        if (value !== leverage) {
+          sizeUsd = value;
+          break;
+        }
+      }
+      // If only leverage is present, fallback to the single number
+      if (!sizeUsd && sizeMatch.length === 1) {
+        sizeUsd = parseFloat(sizeMatch[0].replace('$', ''));
       }
     }
   }

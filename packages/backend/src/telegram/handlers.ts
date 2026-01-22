@@ -424,10 +424,76 @@ export function registerHandlers(bot: Telegraf) {
 
   // /long and /short shortcuts
   bot.command('long', async (ctx) => {
+    const text = ctx.message.text || '';
+    const args = text.replace(/^\/long/i, '').trim();
+    if (args.length > 0) {
+      const parsed = parseTradeCommand(`long ${args}`);
+      if (parsed.success && parsed.command) {
+        const hasType = args.includes('market') || args.includes('limit');
+        const session: OrderContext = {
+          side: 'long',
+          sizeUsd: parsed.command.sizeUsd,
+          leverage: parsed.command.leverage,
+          orderType: hasType ? parsed.command.orderType : undefined,
+          limitPrice: parsed.command.limitPrice,
+          step: hasType ? 'confirm' : 'select_type',
+        };
+        await updateSession(BigInt(ctx.from.id), session);
+
+        if (!hasType) {
+          await ctx.reply(
+            `Long ${TRADING_ASSET}\nSize: $${parsed.command.sizeUsd}\nLeverage: ${parsed.command.leverage}x\n\nSelect order type:`,
+            orderTypeKeyboard()
+          );
+          return;
+        }
+
+        const summary = formatTradeCommand(parsed.command);
+        await ctx.replyWithMarkdown(`*Confirm Order*\n\n${summary}`, confirmOrderKeyboard());
+        return;
+      }
+
+      await ctx.reply(`❌ ${parsed.error || 'Invalid command. Try /long $10 2x'}`);
+      return;
+    }
+
     await handleSideSelection(ctx, 'long');
   });
 
   bot.command('short', async (ctx) => {
+    const text = ctx.message.text || '';
+    const args = text.replace(/^\/short/i, '').trim();
+    if (args.length > 0) {
+      const parsed = parseTradeCommand(`short ${args}`);
+      if (parsed.success && parsed.command) {
+        const hasType = args.includes('market') || args.includes('limit');
+        const session: OrderContext = {
+          side: 'short',
+          sizeUsd: parsed.command.sizeUsd,
+          leverage: parsed.command.leverage,
+          orderType: hasType ? parsed.command.orderType : undefined,
+          limitPrice: parsed.command.limitPrice,
+          step: hasType ? 'confirm' : 'select_type',
+        };
+        await updateSession(BigInt(ctx.from.id), session);
+
+        if (!hasType) {
+          await ctx.reply(
+            `Short ${TRADING_ASSET}\nSize: $${parsed.command.sizeUsd}\nLeverage: ${parsed.command.leverage}x\n\nSelect order type:`,
+            orderTypeKeyboard()
+          );
+          return;
+        }
+
+        const summary = formatTradeCommand(parsed.command);
+        await ctx.replyWithMarkdown(`*Confirm Order*\n\n${summary}`, confirmOrderKeyboard());
+        return;
+      }
+
+      await ctx.reply(`❌ ${parsed.error || 'Invalid command. Try /short $10 2x'}`);
+      return;
+    }
+
     await handleSideSelection(ctx, 'short');
   });
 

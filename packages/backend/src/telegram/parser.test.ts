@@ -35,6 +35,13 @@ describe('parseTradeCommand', () => {
     expect(result.command?.leverage).toBe(1);
   });
 
+  it('should parse small size with $ prefix', () => {
+    const result = parseTradeCommand('Long $10 2x');
+    expect(result.success).toBe(true);
+    expect(result.command?.sizeUsd).toBe(10);
+    expect(result.command?.leverage).toBe(2);
+  });
+
   it('should handle "buy" as long', () => {
     const result = parseTradeCommand('Buy 5x $500');
     expect(result.success).toBe(true);
