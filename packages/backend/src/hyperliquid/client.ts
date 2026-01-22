@@ -272,15 +272,14 @@ export class HyperliquidClient {
       throw new Error('Order size too small');
     }
 
-    // Determine order price
-    let orderPrice: number;
-    let tif: 'Ioc' | 'Gtc';
+    // Determine order price for limit orders
+    let orderPrice: number | undefined;
+    let tif: 'Ioc' | 'Gtc' | undefined;
 
     if (params.orderType === 'market') {
-      // Market order: use slippage-adjusted price with IOC
-      const slippageMultiplier = params.side === 'long' ? 1 + SLIPPAGE_BPS / 10000 : 1 - SLIPPAGE_BPS / 10000;
-      orderPrice = midPrice * slippageMultiplier;
-      tif = 'Ioc';
+      // Market orders use SDK market_open with slippage
+      orderPrice = undefined;
+      tif = undefined;
     } else {
       if (!params.limitPrice) {
         throw new Error('Limit price required for limit orders');
@@ -293,16 +292,26 @@ export class HyperliquidClient {
     await this.updateLeverage(agentPrivateKey, walletAddress, params.leverage, false);
 
     try {
-      const result = await this.signerRequest<OrderResult>('/l1/order', {
-        agent_private_key: agentPrivateKey,
-        wallet_address: walletAddress,
-        coin: ASSET_CONFIG.fullName,
-        is_buy: params.side === 'long',
-        size: roundedSize,
-        limit_px: orderPrice,
-        tif,
-        reduce_only: false,
-      });
+      const result =
+        params.orderType === 'market'
+          ? await this.signerRequest<OrderResult>('/l1/market_open', {
+              agent_private_key: agentPrivateKey,
+              wallet_address: walletAddress,
+              coin: ASSET_CONFIG.fullName,
+              is_buy: params.side === 'long',
+              size: roundedSize,
+              slippage: SLIPPAGE_BPS / 10000,
+            })
+          : await this.signerRequest<OrderResult>('/l1/order', {
+              agent_private_key: agentPrivateKey,
+              wallet_address: walletAddress,
+              coin: ASSET_CONFIG.fullName,
+              is_buy: params.side === 'long',
+              size: roundedSize,
+              limit_px: orderPrice,
+              tif,
+              reduce_only: false,
+            });
 
       if (result.status === 'ok') {
         return { status: 'ok', response: result.response as any };

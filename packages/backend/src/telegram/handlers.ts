@@ -642,11 +642,17 @@ export function registerHandlers(bot: Telegraf) {
           );
         } else if (response?.resting) {
           await ctx.editMessageText(
-            `📝 *Limit Order Placed*\n\nOrder ID: #${response.resting.oid}`,
+            `📝 *Order Placed*\n\nOrder ID: #${response.resting.oid}`,
             { parse_mode: 'Markdown', ...postOrderKeyboard() }
           );
+        } else if (response?.error) {
+          await ctx.editMessageText(`❌ Order rejected: ${response.error}`, mainMenuKeyboard());
         } else {
-          await ctx.editMessageText('Order submitted.', postOrderKeyboard());
+          const statusSummary = formatOrderStatus(result.response);
+          await ctx.editMessageText(
+            `⚠️ *Order submitted but not filled*\n${statusSummary}`,
+            { parse_mode: 'Markdown', ...postOrderKeyboard() }
+          );
         }
       } else {
         await ctx.editMessageText(`❌ Order failed: ${result.error || 'Unknown error'}`, mainMenuKeyboard());
@@ -895,6 +901,27 @@ async function handleRefresh(ctx: Context) {
   } catch (error) {
     await ctx.editMessageText('Error refreshing. Please try again.', mainMenuKeyboard());
   }
+}
+
+function formatOrderStatus(response: any): string {
+  const status = response?.data?.statuses?.[0];
+  if (!status) {
+    return 'No status returned. Use /orders or /position to verify.';
+  }
+
+  if (status.resting?.oid) {
+    return `Order ID: #${status.resting.oid}`;
+  }
+
+  if (status.filled?.totalSz) {
+    return `Filled ${status.filled.totalSz} @ $${status.filled.avgPx}`;
+  }
+
+  if (status.error) {
+    return `Error: ${status.error}`;
+  }
+
+  return `Status: ${JSON.stringify(status)}`;
 }
 
 async function handleCancel(ctx: Context) {
