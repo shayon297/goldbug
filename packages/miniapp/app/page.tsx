@@ -81,11 +81,19 @@ export default function Home() {
       }
     }
 
-    // Only show Telegram error if not in external browser funding mode
+    // Only show Telegram error if not in external browser for funding
+    // action=funding is opened in external browser intentionally, so don't require Telegram
     const isExternalBrowser = !(window as any).Telegram?.WebApp;
-    if (!user && !isExternalBrowser) {
+    const isFundingAction = new URLSearchParams(window.location.search).get('action') === 'funding';
+    
+    if (!user && !isExternalBrowser && !isFundingAction) {
       setError('Please open this app from Telegram');
       setStep('error');
+    }
+    
+    // If external browser funding, skip Telegram check entirely
+    if (isExternalBrowser && isFundingAction) {
+      console.log('[MiniApp] External browser funding mode - skipping Telegram check');
     }
   }, []);
 
@@ -97,7 +105,12 @@ export default function Home() {
         step === 'registering' || step === 'error' || step === 'success') return;
 
     if (authenticated && wallets.length > 0) {
-      if (wantsBridge) {
+      if (wantsFunding) {
+        // External browser funding - stay on success/loading, let auto-trigger useEffect handle it
+        console.log('[MiniApp] External browser funding mode - waiting for auto-trigger');
+        // Don't change step - the other useEffect will trigger fundWallet
+        return;
+      } else if (wantsBridge) {
         console.log('[MiniApp] Going to bridge step');
         setStep('bridge');
       } else if (wantsOnramp) {
@@ -110,12 +123,8 @@ export default function Home() {
         setStep('authorize');
       }
     } else if (!authenticated) {
-      // If user wants onramp but not authenticated, go to login
-      if (wantsOnramp) {
-        setStep('login');
-      } else {
-        setStep('login');
-      }
+      // Go to login for any action
+      setStep('login');
     }
   }, [ready, authenticated, wallets, wantsBridge, wantsReauth, wantsOnramp, wantsFunding, step]);
 
