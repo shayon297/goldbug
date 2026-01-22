@@ -452,8 +452,8 @@ export function registerHandlers(bot: Telegraf) {
         return;
       }
 
-      if (value < 5) {
-        await ctx.reply('Minimum size is $5');
+      if (value < 10) {
+        await ctx.reply('Minimum size is $10');
         return;
       }
 
@@ -536,7 +536,7 @@ export function registerHandlers(bot: Telegraf) {
     const session = await getOrCreateSession(telegramId);
 
     if (sizeValue === 'custom') {
-      await ctx.editMessageText('Enter custom size (e.g., "$750" or "750"):');
+      await ctx.editMessageText('Enter custom size (min $10, e.g., "$750" or "750"):');
       return;
     }
 
