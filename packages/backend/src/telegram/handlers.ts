@@ -215,7 +215,8 @@ export function registerHandlers(bot: Telegraf) {
       `• Your USDC balance appears automatically\n` +
       `• Use /long or /short to open positions\n` +
       `• Trading on Hyperliquid is *gasless* ⚡\n\n` +
-      `💡 *Minimum:* $10 USDC to start trading`
+      `💡 *Minimum:* $10 USDC to start trading\n` +
+      `➕ *Adding more later:* just send more USDC to the same wallet address above`
     );
   });
 
