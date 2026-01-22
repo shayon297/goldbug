@@ -4,9 +4,11 @@ import { TRADING_ASSET } from '../hyperliquid/client.js';
 /**
  * Natural language command parser for trading commands
  * Supports formats like:
- * - "Long 5x $1000 market"
- * - "Short 2x $500 limit 2800"
- * - "long 10x 1000"
+ * - "long 15" → Long $15 at 1x market
+ * - "long $100 5x" → Long $100 at 5x market
+ * - "short 50 2x limit 4800" → Short $50 at 2x, limit $4800
+ * - "close" → Close entire position (market)
+ * - "close half" → Close 50% of position
  */
 
 const TradeCommandSchema = z.object({
@@ -25,8 +27,44 @@ export interface ParseResult {
   error?: string;
 }
 
+// Close command result
+export interface CloseParseResult {
+  isClose: boolean;
+  fraction: number; // 1.0 for full, 0.5 for half
+}
+
+/**
+ * Check if the text is a close command
+ * Returns { isClose: true, fraction } if it's a close command
+ */
+export function parseCloseCommand(text: string): CloseParseResult {
+  const normalized = text.toLowerCase().trim();
+  
+  // Match "close", "close all", "close position"
+  if (/^close(\s+all|\s+position)?$/i.test(normalized)) {
+    return { isClose: true, fraction: 1.0 };
+  }
+  
+  // Match "close half", "close 50%", "close 50"
+  if (/^close\s+(half|50%?|1\/2)$/i.test(normalized)) {
+    return { isClose: true, fraction: 0.5 };
+  }
+  
+  // Match "close X%" where X is a number
+  const percentMatch = normalized.match(/^close\s+(\d+)%?$/);
+  if (percentMatch) {
+    const percent = parseInt(percentMatch[1], 10);
+    if (percent > 0 && percent <= 100) {
+      return { isClose: true, fraction: percent / 100 };
+    }
+  }
+  
+  return { isClose: false, fraction: 0 };
+}
+
 /**
  * Parse a natural language trading command
+ * Defaults: 1x leverage, market order
  */
 export function parseTradeCommand(text: string): ParseResult {
   const normalized = text.toLowerCase().trim();
@@ -43,7 +81,7 @@ export function parseTradeCommand(text: string): ParseResult {
     return { success: false, error: 'Specify "long" or "short"' };
   }
 
-  // Extract leverage (e.g., "5x", "10x")
+  // Extract leverage (e.g., "5x", "10x") - defaults to 1x
   const leverageMatch = normalized.match(/(\d{1,2})x/);
   const leverage = leverageMatch ? parseInt(leverageMatch[1], 10) : 1;
 
@@ -52,32 +90,29 @@ export function parseTradeCommand(text: string): ParseResult {
   }
 
   // Extract size (e.g., "$1000", "1000", "$500")
-  const sizeMatch = normalized.match(/\$?\d+(?:\.\d{1,2})?/g);
+  // Be smarter about finding the size - exclude leverage values
+  const allNumbers = normalized.match(/\$?\d+(?:\.\d{1,2})?/g) || [];
   let sizeUsd: number | null = null;
 
-  if (sizeMatch) {
-    // Prefer explicitly $-prefixed values
-    const dollarValue = sizeMatch.find((match) => match.startsWith('$'));
-    if (dollarValue) {
-      sizeUsd = parseFloat(dollarValue.replace('$', ''));
-    } else {
-      // Otherwise pick a value that is not the leverage
-      for (const match of sizeMatch) {
-        const value = parseFloat(match.replace('$', ''));
-        if (value !== leverage) {
-          sizeUsd = value;
-          break;
-        }
-      }
-      // If only leverage is present, fallback to the single number
-      if (!sizeUsd && sizeMatch.length === 1) {
-        sizeUsd = parseFloat(sizeMatch[0].replace('$', ''));
+  // Prefer explicitly $-prefixed values
+  const dollarValue = allNumbers.find((match) => match.startsWith('$'));
+  if (dollarValue) {
+    sizeUsd = parseFloat(dollarValue.replace('$', ''));
+  } else {
+    // Find a number that isn't the leverage value
+    for (const match of allNumbers) {
+      const value = parseFloat(match.replace('$', ''));
+      // Skip if this exact string is part of leverage pattern (e.g., "5" in "5x")
+      const leveragePattern = new RegExp(`\\b${value}x\\b`, 'i');
+      if (!leveragePattern.test(normalized)) {
+        sizeUsd = value;
+        break;
       }
     }
   }
 
   if (!sizeUsd) {
-    return { success: false, error: 'Specify order size (e.g., "$500")' };
+    return { success: false, error: 'Specify order size (e.g., "long $50" or "long 50 2x")' };
   }
 
   if (sizeUsd < 10) {
@@ -96,7 +131,7 @@ export function parseTradeCommand(text: string): ParseResult {
     return { success: false, error: 'Maximum order size is $100,000' };
   }
 
-  // Extract order type
+  // Extract order type - defaults to market
   let orderType: 'market' | 'limit' = 'market';
   let limitPrice: number | undefined;
 
@@ -111,7 +146,7 @@ export function parseTradeCommand(text: string): ParseResult {
   }
 
   if (orderType === 'limit' && !limitPrice) {
-    return { success: false, error: 'Limit orders require a price (e.g., "limit 2800")' };
+    return { success: false, error: 'Limit orders require a price (e.g., "limit 4800")' };
   }
 
   // Validate with Zod

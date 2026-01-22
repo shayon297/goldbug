@@ -370,20 +370,33 @@ export class HyperliquidClient {
    * Close entire position at market
    */
   async closePosition(agentPrivateKey: string, walletAddress: string): Promise<OrderResult> {
+    return this.closePartialPosition(agentPrivateKey, walletAddress, 1.0);
+  }
+
+  /**
+   * Close a fraction of the position at market
+   * @param fraction - 1.0 for full close, 0.5 for half, etc.
+   */
+  async closePartialPosition(agentPrivateKey: string, walletAddress: string, fraction: number): Promise<OrderResult> {
     const position = await this.getGoldPosition(walletAddress);
 
     if (!position || parseFloat(position.position.szi) === 0) {
       throw new Error(`No ${ASSET_CONFIG.fullName} position to close`);
     }
 
-    const size = Math.abs(parseFloat(position.position.szi));
+    const fullSize = Math.abs(parseFloat(position.position.szi));
+    const closeSize = this.roundToDecimals(fullSize * fraction, this.assetDecimals);
+
+    if (closeSize <= 0) {
+      throw new Error('Close size too small');
+    }
 
     try {
       const result = await this.signerRequest<OrderResult>('/l1/market_close', {
         agent_private_key: agentPrivateKey,
         wallet_address: walletAddress,
         coin: ASSET_CONFIG.fullName,
-        size,
+        size: closeSize,
         slippage: SLIPPAGE_BPS / 10000,
       });
 

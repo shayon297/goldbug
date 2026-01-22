@@ -5,7 +5,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { ethers } from 'ethers';
 import { createBot, startBot } from './telegram/bot.js';
-import { prisma, createUser, getAllUsers } from './state/db.js';
+import { prisma, createUser, getAllUsers, getOrCreateSession, clearSession, getUserByTelegramId } from './state/db.js';
 import { getHyperliquidClient, TRADING_ASSET } from './hyperliquid/client.js';
 import {
   verifyPrivyToken,
@@ -167,6 +167,95 @@ async function main() {
   // Telegram webhook endpoint
   app.post(`/telegram/${WEBHOOK_SECRET}`, express.json(), (req, res) => {
     bot.handleUpdate(req.body, res);
+  });
+
+  // Auth completion webhook - called by Mini App after successful agent authorization
+  app.post('/api/auth-complete', registrationLimiter, async (req: Request, res: Response) => {
+    try {
+      const { telegramUserId } = req.body;
+      
+      if (!telegramUserId) {
+        res.status(400).json({ error: 'Missing telegramUserId' });
+        return;
+      }
+
+      const telegramId = BigInt(telegramUserId);
+      const user = await getUserByTelegramId(telegramId);
+      
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      // Check for pending order
+      const session = await getOrCreateSession(telegramId);
+      
+      if (!session.pendingOrder) {
+        res.json({ success: true, orderExecuted: false });
+        return;
+      }
+
+      const { pendingOrder } = session;
+      
+      console.log(`[AuthComplete] Executing pending order for user ${telegramUserId}:`, pendingOrder);
+
+      try {
+        const hl = await getHyperliquidClient();
+        
+        const result = await hl.placeOrder(user.agentPrivateKey, user.walletAddress, {
+          side: pendingOrder.side,
+          sizeUsd: pendingOrder.sizeUsd,
+          leverage: pendingOrder.leverage,
+          orderType: pendingOrder.orderType,
+          limitPrice: pendingOrder.limitPrice,
+        });
+
+        // Clear the session
+        await clearSession(telegramId);
+
+        if (result.status === 'ok') {
+          const response = result.response?.data?.statuses[0];
+          let orderMessage = '✅ *Order Executed*\n\nYour pending order was placed successfully after authorization.';
+          
+          if (response?.filled) {
+            orderMessage = `✅ *Order Filled*\n\n` +
+              `${pendingOrder.side.toUpperCase()} ${response.filled.totalSz} ${TRADING_ASSET}\n` +
+              `Avg Price: $${response.filled.avgPx}`;
+          } else if (response?.resting) {
+            orderMessage = `📝 *Order Placed*\n\nOrder ID: #${response.resting.oid}`;
+          } else if (response?.error) {
+            orderMessage = `❌ Order rejected: ${response.error}`;
+          }
+
+          // Send notification to user
+          await bot.telegram.sendMessage(Number(telegramId), orderMessage, { parse_mode: 'Markdown' });
+          
+          res.json({ success: true, orderExecuted: true, result });
+        } else {
+          const errorMsg = result.error || 'Unknown error';
+          await bot.telegram.sendMessage(
+            Number(telegramId),
+            `❌ Failed to execute pending order: ${errorMsg}`,
+            { parse_mode: 'Markdown' }
+          );
+          res.json({ success: false, error: errorMsg });
+        }
+      } catch (orderError) {
+        const errorMsg = orderError instanceof Error ? orderError.message : 'Unknown error';
+        console.error('[AuthComplete] Order execution failed:', orderError);
+        
+        await bot.telegram.sendMessage(
+          Number(telegramId),
+          `❌ Failed to execute pending order: ${errorMsg}`,
+          { parse_mode: 'Markdown' }
+        );
+        
+        res.json({ success: false, error: errorMsg });
+      }
+    } catch (error) {
+      console.error('[AuthComplete] Error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   });
 
   // Error handler

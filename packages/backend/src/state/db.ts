@@ -4,6 +4,8 @@ import { encryptPrivateKey, decryptPrivateKey } from './crypto.js';
 
 export const prisma = new PrismaClient();
 
+export { encryptPrivateKey, decryptPrivateKey };
+
 export interface CreateUserInput {
   telegramId: bigint;
   privyUserId: string;
@@ -125,6 +127,14 @@ export interface OrderContext {
   orderType?: 'market' | 'limit';
   limitPrice?: number;
   step: 'idle' | 'select_side' | 'select_size' | 'select_leverage' | 'select_type' | 'confirm';
+  // Pending order for auto-retry after authorization
+  pendingOrder?: {
+    side: 'long' | 'short';
+    sizeUsd: number;
+    leverage: number;
+    orderType: 'market' | 'limit';
+    limitPrice?: number;
+  };
 }
 
 export async function getOrCreateSession(telegramId: bigint): Promise<OrderContext> {

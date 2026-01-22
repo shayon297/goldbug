@@ -372,6 +372,19 @@ export default function Home() {
       // If user needs to deposit first, show a different message
       if (needsDeposit) {
         setError('Wallet connected! You need to deposit funds first, then use /reauth to enable trading.');
+      } else if (agentApproved) {
+        // Notify backend that auth is complete - this will auto-execute any pending order
+        try {
+          await fetch(`${API_URL}/api/auth-complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telegramUserId: telegramUser.id.toString() }),
+          });
+          console.log('[MiniApp] Notified backend of auth completion');
+        } catch (notifyError) {
+          console.warn('[MiniApp] Failed to notify auth completion:', notifyError);
+          // Non-fatal - the order can be retried manually
+        }
       }
       
       setStep('success');

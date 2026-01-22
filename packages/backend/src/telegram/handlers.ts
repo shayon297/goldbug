@@ -2,6 +2,7 @@ import { Context, Telegraf } from 'telegraf';
 import { ethers, Contract } from 'ethers';
 import {
   mainMenuKeyboard,
+  dashboardKeyboard,
   connectWalletKeyboard,
   sizeSelectionKeyboard,
   leverageSelectionKeyboard,
@@ -15,7 +16,7 @@ import {
   closeConfirmKeyboard,
   authorizeKeyboard,
 } from './keyboards.js';
-import { parseTradeCommand, formatTradeCommand, sanitizeInput } from './parser.js';
+import { parseTradeCommand, parseCloseCommand, formatTradeCommand, sanitizeInput } from './parser.js';
 import {
   getUserByTelegramId,
   userExists,
@@ -132,13 +133,42 @@ export function registerHandlers(bot: Telegraf) {
       if (!user) return;
 
       try {
-        const summary = await getAccountSummary(user.walletAddress);
-        const welcomeMsg = 
+        const hl = await getHyperliquidClient();
+        
+        // Fetch all data in parallel
+        const [state, position, price] = await Promise.all([
+          hl.getUserState(user.walletAddress),
+          hl.getGoldPosition(user.walletAddress),
+          hl.getGoldPrice(),
+        ]);
+
+        const balance = parseFloat(state.marginSummary.accountValue).toFixed(2);
+        const hasPosition = !!(position && parseFloat(position.position.szi) !== 0);
+
+        // Build compact dashboard
+        let positionText = 'No position';
+        if (hasPosition) {
+          const size = parseFloat(position.position.szi);
+          const side = size > 0 ? 'LONG' : 'SHORT';
+          const entry = parseFloat(position.position.entryPx).toFixed(2);
+          const pnl = parseFloat(position.position.unrealizedPnl);
+          const pnlSign = pnl >= 0 ? '+' : '';
+          const leverage = position.position.leverage.value;
+          positionText = `${side} ${Math.abs(size).toFixed(4)} @ $${entry} (${pnlSign}$${pnl.toFixed(2)})`;
+        }
+
+        // Count open orders
+        const orders = await hl.getOpenOrders(user.walletAddress);
+        const ordersText = orders.length > 0 ? `${orders.length} open` : 'none';
+
+        const dashboard = 
           `🥇 *${TRADING_ASSET} Trading Bot*\n\n` +
-          `✅ *Wallet Connected*\n` +
-          `\`${formatWalletAddress(user.walletAddress)}\`\n\n` +
-          summary;
-        await ctx.replyWithMarkdown(welcomeMsg, mainMenuKeyboard());
+          `💰 *Balance:* $${balance}\n` +
+          `📊 *Position:* ${positionText}\n` +
+          `📋 *Orders:* ${ordersText}\n` +
+          `💲 *Price:* $${price.toFixed(2)}`;
+
+        await ctx.replyWithMarkdown(dashboard, dashboardKeyboard(hasPosition, MINIAPP_URL));
       } catch (error) {
         await ctx.replyWithMarkdown(
           `🥇 *${TRADING_ASSET} Trading Bot*\n\n` +
@@ -592,8 +622,16 @@ export function registerHandlers(bot: Telegraf) {
       return;
     }
 
-    // Try to parse as natural language trade command
     const sanitized = sanitizeInput(ctx.message.text);
+
+    // Check for close command first (e.g., "close", "close half", "close 50%")
+    const closeResult = parseCloseCommand(sanitized);
+    if (closeResult.isClose) {
+      await handleCloseText(ctx, user, closeResult.fraction);
+      return;
+    }
+
+    // Try to parse as natural language trade command
     const parsed = parseTradeCommand(sanitized);
 
     if (parsed.success && parsed.command) {
@@ -641,6 +679,9 @@ export function registerHandlers(bot: Telegraf) {
         break;
       case 'settings':
         await handleSettings(ctx);
+        break;
+      case 'details':
+        await handleDetails(ctx);
         break;
       case 'menu':
       case 'refresh':
@@ -797,10 +838,24 @@ export function registerHandlers(bot: Telegraf) {
         
         // Check if agent not approved on Hyperliquid (user deposited but hasn't authorized yet)
         if (errorMsg.includes('does not exist') || errorMsg.includes('User or API Wallet')) {
+          // Save pending order for auto-retry after authorization
+          await updateSession(telegramId, {
+            ...session,
+            step: 'idle',
+            pendingOrder: {
+              side: session.side!,
+              sizeUsd: session.sizeUsd!,
+              leverage: session.leverage!,
+              orderType: session.orderType!,
+              limitPrice: session.limitPrice,
+            },
+          });
+          
           await ctx.editMessageText(
             `🔐 *Authorization Required*\n\n` +
             `Your wallet has funds but trading isn't enabled yet.\n` +
-            `Tap below to authorize trading:`,
+            `Tap below to authorize trading.\n\n` +
+            `_Your order will execute automatically after authorization._`,
             { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
           );
         } else {
@@ -812,10 +867,24 @@ export function registerHandlers(bot: Telegraf) {
       
       // Check if agent not approved on Hyperliquid
       if (message.includes('does not exist') || message.includes('User or API Wallet')) {
+        // Save pending order for auto-retry after authorization
+        await updateSession(telegramId, {
+          ...session,
+          step: 'idle',
+          pendingOrder: {
+            side: session.side!,
+            sizeUsd: session.sizeUsd!,
+            leverage: session.leverage!,
+            orderType: session.orderType!,
+            limitPrice: session.limitPrice,
+          },
+        });
+        
         await ctx.editMessageText(
           `🔐 *Authorization Required*\n\n` +
           `Your wallet has funds but trading isn't enabled yet.\n` +
-          `Tap below to authorize trading:`,
+          `Tap below to authorize trading.\n\n` +
+          `_Your order will execute automatically after authorization._`,
           { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
         );
       } else {
@@ -1087,6 +1156,23 @@ async function handleRefresh(ctx: Context) {
   }
 }
 
+async function handleDetails(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+
+  if (!user) return;
+
+  try {
+    const summary = await getAccountSummary(user.walletAddress);
+    await ctx.editMessageText(summary, {
+      parse_mode: 'Markdown',
+      ...balanceKeyboard(MINIAPP_URL),
+    });
+  } catch (error) {
+    await ctx.editMessageText('Error loading details. Please try again.', mainMenuKeyboard());
+  }
+}
+
 function formatOrderStatus(response: any): string {
   const status = response?.data?.statuses?.[0];
   if (!status) {
@@ -1112,5 +1198,67 @@ async function handleCancel(ctx: Context) {
   const telegramId = BigInt(ctx.from!.id);
   await clearSession(telegramId);
   await ctx.editMessageText('Cancelled.', mainMenuKeyboard());
+}
+
+/**
+ * Handle text-based close commands (e.g., "close", "close half")
+ */
+async function handleCloseText(
+  ctx: Context,
+  user: { walletAddress: string; agentPrivateKey: string; agentAddress: string },
+  fraction: number
+) {
+  try {
+    const hl = await getHyperliquidClient();
+    const position = await hl.getGoldPosition(user.walletAddress);
+
+    if (!position || parseFloat(position.position.szi) === 0) {
+      await ctx.reply('📊 No position to close.', mainMenuKeyboard());
+      return;
+    }
+
+    const size = parseFloat(position.position.szi);
+    const side = size > 0 ? 'LONG' : 'SHORT';
+    const closeSize = Math.abs(size) * fraction;
+    const fractionLabel = fraction === 1 ? 'entire' : `${Math.round(fraction * 100)}% of`;
+
+    await ctx.reply(`⏳ Closing ${fractionLabel} position...`);
+
+    const result = await hl.closePartialPosition(user.agentPrivateKey, user.walletAddress, fraction);
+
+    if (result.status === 'ok') {
+      const response = result.response?.data?.statuses[0];
+      if (response?.filled) {
+        await ctx.replyWithMarkdown(
+          `✅ *Position Closed*\n\n` +
+            `${side} ${response.filled.totalSz} ${TRADING_ASSET}\n` +
+            `Close Price: $${response.filled.avgPx}`,
+          mainMenuKeyboard()
+        );
+      } else {
+        await ctx.reply('Position closed.', mainMenuKeyboard());
+      }
+    } else {
+      const errorMsg = result.error || 'Unknown error';
+      if (errorMsg.includes('does not exist') || errorMsg.includes('User or API Wallet')) {
+        await ctx.replyWithMarkdown(
+          `🔐 *Authorization Required*\n\nTap below to authorize trading:`,
+          authorizeKeyboard(MINIAPP_URL)
+        );
+      } else {
+        await ctx.reply(`❌ Failed to close: ${errorMsg}`, mainMenuKeyboard());
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    if (message.includes('does not exist') || message.includes('User or API Wallet')) {
+      await ctx.replyWithMarkdown(
+        `🔐 *Authorization Required*\n\nTap below to authorize trading:`,
+        authorizeKeyboard(MINIAPP_URL)
+      );
+    } else {
+      await ctx.reply(`❌ Error: ${message}`, mainMenuKeyboard());
+    }
+  }
 }
 
