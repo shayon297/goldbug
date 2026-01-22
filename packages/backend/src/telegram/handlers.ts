@@ -487,6 +487,8 @@ export function registerHandlers(bot: Telegraf) {
 
       const summary = formatTradeCommand(parsed.command);
       await ctx.replyWithMarkdown(`*Confirm Order*\n\n${summary}`, confirmOrderKeyboard());
+    } else if (parsed.error) {
+      await ctx.reply(`❌ ${parsed.error}`);
     }
   });
 
@@ -558,6 +560,18 @@ export function registerHandlers(bot: Telegraf) {
     session.leverage = leverage;
     session.step = 'select_type';
     await updateSession(telegramId, session);
+
+    // Enforce minimum margin requirement: size / leverage must be >= $10
+    if ((session.sizeUsd || 0) / leverage < 10) {
+      const minSize = Math.ceil(leverage * 10);
+      session.step = 'select_size';
+      await updateSession(telegramId, session);
+      await ctx.editMessageText(
+        `❌ Minimum margin is $10.\nWith ${leverage}x leverage, minimum size is $${minSize}.\n\nSelect a larger size:`,
+        sizeSelectionKeyboard()
+      );
+      return;
+    }
 
     await ctx.editMessageText(
       `${session.side?.toUpperCase()} ${TRADING_ASSET}\nSize: $${session.sizeUsd}\nLeverage: ${leverage}x\n\nSelect order type:`,

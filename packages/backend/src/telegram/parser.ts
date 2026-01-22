@@ -75,6 +75,14 @@ export function parseTradeCommand(text: string): ParseResult {
     return { success: false, error: 'Minimum order size is $10' };
   }
 
+  if (sizeUsd / leverage < 10) {
+    const minSize = Math.ceil(leverage * 10);
+    return {
+      success: false,
+      error: `Minimum margin is $10. With ${leverage}x leverage, minimum size is $${minSize}`,
+    };
+  }
+
   if (sizeUsd > 100000) {
     return { success: false, error: 'Maximum order size is $100,000' };
   }
