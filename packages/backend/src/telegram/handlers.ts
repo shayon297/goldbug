@@ -30,6 +30,35 @@ import { getHyperliquidClient, TRADING_ASSET } from '../hyperliquid/client.js';
 
 const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
 
+/**
+ * Check if user has existing position with different leverage (for warning)
+ */
+async function getLeverageWarning(walletAddress: string, requestedLeverage: number): Promise<string | null> {
+  try {
+    const hl = await getHyperliquidClient();
+    const position = await hl.getGoldPosition(walletAddress);
+    
+    if (!position || parseFloat(position.position.szi) === 0) {
+      return null; // No existing position
+    }
+    
+    const currentLeverage = position.position.leverage.value;
+    const leverageType = position.position.leverage.type;
+    
+    if (leverageType === 'isolated' && currentLeverage !== requestedLeverage) {
+      return `⚠️ *Leverage Warning*\n` +
+        `You have an existing ${currentLeverage}x isolated position.\n` +
+        `This trade will be added at ${currentLeverage}x (not ${requestedLeverage}x).\n` +
+        `_To use ${requestedLeverage}x, close position first._\n\n`;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('[LeverageWarning] Error:', error);
+    return null; // Don't block order on error
+  }
+}
+
 // Arbitrum config for balance checking
 const ARBITRUM_RPC = 'https://arb1.arbitrum.io/rpc';
 const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
@@ -511,6 +540,14 @@ export function registerHandlers(bot: Telegraf) {
 
   // /long and /short shortcuts
   bot.command('long', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+    
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
     const text = ctx.message.text || '';
     const args = text.replace(/^\/long/i, '').trim();
     if (args.length > 0) {
@@ -525,7 +562,7 @@ export function registerHandlers(bot: Telegraf) {
           limitPrice: parsed.command.limitPrice,
           step: hasType ? 'confirm' : 'select_type',
         };
-        await updateSession(BigInt(ctx.from.id), session);
+        await updateSession(telegramId, session);
 
         if (!hasType) {
           await ctx.reply(
@@ -535,8 +572,9 @@ export function registerHandlers(bot: Telegraf) {
           return;
         }
 
+        const leverageWarning = await getLeverageWarning(user.walletAddress, parsed.command.leverage);
         const summary = formatTradeCommand(parsed.command);
-        await ctx.replyWithMarkdown(`*Confirm Order*\n\n${summary}`, confirmOrderKeyboard());
+        await ctx.replyWithMarkdown(`*Confirm Order*\n\n${leverageWarning || ''}${summary}`, confirmOrderKeyboard());
         return;
       }
 
@@ -548,6 +586,14 @@ export function registerHandlers(bot: Telegraf) {
   });
 
   bot.command('short', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+    
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
     const text = ctx.message.text || '';
     const args = text.replace(/^\/short/i, '').trim();
     if (args.length > 0) {
@@ -562,7 +608,7 @@ export function registerHandlers(bot: Telegraf) {
           limitPrice: parsed.command.limitPrice,
           step: hasType ? 'confirm' : 'select_type',
         };
-        await updateSession(BigInt(ctx.from.id), session);
+        await updateSession(telegramId, session);
 
         if (!hasType) {
           await ctx.reply(
@@ -572,8 +618,9 @@ export function registerHandlers(bot: Telegraf) {
           return;
         }
 
+        const leverageWarning = await getLeverageWarning(user.walletAddress, parsed.command.leverage);
         const summary = formatTradeCommand(parsed.command);
-        await ctx.replyWithMarkdown(`*Confirm Order*\n\n${summary}`, confirmOrderKeyboard());
+        await ctx.replyWithMarkdown(`*Confirm Order*\n\n${leverageWarning || ''}${summary}`, confirmOrderKeyboard());
         return;
       }
 
@@ -646,8 +693,9 @@ export function registerHandlers(bot: Telegraf) {
       };
       await updateSession(telegramId, newSession);
 
+      const leverageWarning = await getLeverageWarning(user.walletAddress, parsed.command.leverage);
       const summary = formatTradeCommand(parsed.command);
-      await ctx.replyWithMarkdown(`*Confirm Order*\n\n${summary}`, confirmOrderKeyboard());
+      await ctx.replyWithMarkdown(`*Confirm Order*\n\n${leverageWarning || ''}${summary}`, confirmOrderKeyboard());
     } else if (parsed.error) {
       await ctx.reply(`❌ ${parsed.error}`);
     }
@@ -749,6 +797,7 @@ export function registerHandlers(bot: Telegraf) {
     await ctx.answerCbQuery();
 
     const telegramId = BigInt(ctx.from!.id);
+    const user = await getUserByTelegramId(telegramId);
     const session = await getOrCreateSession(telegramId);
 
     session.orderType = orderType;
@@ -760,6 +809,7 @@ export function registerHandlers(bot: Telegraf) {
       return;
     }
 
+    const leverageWarning = user ? await getLeverageWarning(user.walletAddress, session.leverage!) : null;
     const summary = formatTradeCommand({
       side: session.side!,
       sizeUsd: session.sizeUsd!,
@@ -768,7 +818,7 @@ export function registerHandlers(bot: Telegraf) {
       limitPrice: session.limitPrice,
     });
 
-    await ctx.editMessageText(`*Confirm Order*\n\n${summary}`, {
+    await ctx.editMessageText(`*Confirm Order*\n\n${leverageWarning || ''}${summary}`, {
       parse_mode: 'Markdown',
       ...confirmOrderKeyboard(),
     });
