@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy, useWallets, useFundWallet } from '@privy-io/react-auth';
 import { Wallet, ethers, Contract, formatUnits, parseUnits } from 'ethers';
 import { arbitrum } from 'viem/chains';
 import {
@@ -33,6 +33,7 @@ export default function Home() {
   const privy = usePrivy();
   const { ready, authenticated, login, getAccessToken } = privy;
   const { wallets } = useWallets();
+  const { fundWallet } = useFundWallet();
 
   const [step, setStep] = useState<Step>('init');
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +45,10 @@ export default function Home() {
   const [wantsBridge, setWantsBridge] = useState(false);
   const [wantsReauth, setWantsReauth] = useState(false);
   const [wantsOnramp, setWantsOnramp] = useState(false);
+  const [wantsFunding, setWantsFunding] = useState(false);
+  const [fundingAddress, setFundingAddress] = useState<string | null>(null);
   const checkedUrl = useRef(false);
+  const fundingTriggered = useRef(false);
 
   // Initialize Telegram Web App and check URL params
   useEffect(() => {
@@ -68,10 +72,18 @@ export default function Home() {
       } else if (action === 'onramp') {
         console.log('[MiniApp] Onramp action detected');
         setWantsOnramp(true);
+      } else if (action === 'funding') {
+        // Opened in external browser for funding
+        console.log('[MiniApp] Funding action detected (external browser)');
+        setWantsFunding(true);
+        const addr = params.get('address') || hashParams.get('address');
+        if (addr) setFundingAddress(addr);
       }
     }
 
-    if (!user) {
+    // Only show Telegram error if not in external browser funding mode
+    const isExternalBrowser = !(window as any).Telegram?.WebApp;
+    if (!user && !isExternalBrowser) {
       setError('Please open this app from Telegram');
       setStep('error');
     }
@@ -105,7 +117,37 @@ export default function Home() {
         setStep('login');
       }
     }
-  }, [ready, authenticated, wallets, wantsBridge, wantsReauth, wantsOnramp, step]);
+  }, [ready, authenticated, wallets, wantsBridge, wantsReauth, wantsOnramp, wantsFunding, step]);
+
+  // Auto-trigger funding when opened in external browser with funding action
+  useEffect(() => {
+    if (!ready || !authenticated || wallets.length === 0) return;
+    if (!wantsFunding || fundingTriggered.current) return;
+    if (!fundWallet) return;
+
+    // We're in external browser with funding action - trigger Privy's fundWallet
+    fundingTriggered.current = true;
+    const address = fundingAddress || wallets.find((w) => w.walletClientType === 'privy')?.address || wallets[0]?.address;
+    
+    if (!address) return;
+
+    console.log('[MiniApp] Auto-triggering Privy fundWallet for:', address);
+    
+    fundWallet({
+      address,
+      options: {
+        chain: arbitrum,
+        asset: 'USDC',
+        amount: '10',
+        defaultFundingMethod: 'card',
+        card: {
+          preferredProvider: 'moonpay',
+        },
+      },
+    }).catch((err) => {
+      console.error('[MiniApp] Auto-funding failed:', err);
+    });
+  }, [ready, authenticated, wallets, wantsFunding, fundingAddress, fundWallet]);
 
   // Handle login
   const handleLogin = useCallback(async () => {
@@ -117,8 +159,11 @@ export default function Home() {
     }
   }, [login]);
 
-  // Open MoonPay in external browser (Privy modal doesn't work in Telegram WebView)
-  const handleMoonPayFunding = useCallback(() => {
+  // Check if we're in an external browser (not Telegram WebView)
+  const isExternalBrowser = typeof window !== 'undefined' && !(window as any).Telegram?.WebApp;
+
+  // Open MoonPay via Privy - works in external browser, opens external for Telegram WebView
+  const handleMoonPayFunding = useCallback(async () => {
     // Get embedded wallet address
     const embeddedWallet = wallets.find((w) => w.walletClientType === 'privy');
     const address = embeddedWallet?.address || wallets[0]?.address;
@@ -129,28 +174,44 @@ export default function Home() {
       return;
     }
 
-    // MoonPay API key from environment
-    const moonpayApiKey = process.env.NEXT_PUBLIC_MOONPAY_API_KEY;
-    
-    if (!moonpayApiKey) {
-      setError('MoonPay is not configured. Please contact support.');
+    // If we're in Telegram WebView, open in external browser where Privy modal works
+    if (!isExternalBrowser) {
+      // Open Mini App in external browser with funding action
+      const externalUrl = `${window.location.origin}?action=funding&address=${address}`;
+      console.log('[MiniApp] Opening in external browser:', externalUrl);
+      openExternalLink(externalUrl);
+      return;
+    }
+
+    // We're in external browser - use Privy's fundWallet
+    if (!fundWallet) {
+      setError('Privy funding is not available. Please refresh the page.');
       setStep('error');
       return;
     }
 
-    // Construct MoonPay URL for USDC on Arbitrum
-    const moonpayUrl = new URL('https://buy.moonpay.com');
-    moonpayUrl.searchParams.set('apiKey', moonpayApiKey);
-    moonpayUrl.searchParams.set('currencyCode', 'usdc_arbitrum');
-    moonpayUrl.searchParams.set('walletAddress', address);
-    moonpayUrl.searchParams.set('baseCurrencyCode', 'usd');
-    moonpayUrl.searchParams.set('defaultCurrencyCode', 'usdc_arbitrum');
-
-    console.log('[MiniApp] Opening MoonPay:', moonpayUrl.toString());
-
-    // Open in external browser (outside Telegram WebView)
-    openExternalLink(moonpayUrl.toString());
-  }, [wallets]);
+    try {
+      console.log('[MiniApp] Calling Privy fundWallet for:', address);
+      await fundWallet({
+        address,
+        options: {
+          chain: arbitrum,
+          asset: 'USDC',
+          amount: '10',
+          defaultFundingMethod: 'card',
+          card: {
+            preferredProvider: 'moonpay',
+          },
+        },
+      });
+      console.log('[MiniApp] Funding completed');
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error('[MiniApp] Funding failed:', err);
+      setError(`Funding failed: ${errorMessage}`);
+      setStep('error');
+    }
+  }, [wallets, fundWallet, isExternalBrowser]);
 
   // Handle agent authorization and registration
   const handleAuthorize = useCallback(async () => {
