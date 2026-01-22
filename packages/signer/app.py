@@ -12,6 +12,10 @@ API_URL = os.getenv("HYPERLIQUID_API_URL", "https://api.hyperliquid.xyz")
 TRADING_ASSET = os.getenv("TRADING_ASSET", "xyz:GOLD")
 SIGNER_API_KEY = os.getenv("SIGNER_API_KEY")
 
+# Builder fee configuration - fee in tenths of basis points (100 = 10bp = 0.1%)
+BUILDER_ADDRESS = os.getenv("BUILDER_ADDRESS", "")
+BUILDER_FEE_BPS = int(os.getenv("BUILDER_FEE_BPS", "100"))
+
 
 def parse_dex(asset: str) -> Optional[str]:
     if ":" in asset:
@@ -20,6 +24,13 @@ def parse_dex(asset: str) -> Optional[str]:
 
 
 PERP_DEX = parse_dex(TRADING_ASSET)
+
+
+def get_builder() -> Optional[dict]:
+    """Get builder fee config if enabled, else None."""
+    if BUILDER_ADDRESS and BUILDER_ADDRESS != "0x...your_builder_wallet_address":
+        return {"b": BUILDER_ADDRESS.lower(), "f": BUILDER_FEE_BPS}
+    return None
 
 
 def ensure_hex_prefix(key: str) -> str:
@@ -114,6 +125,7 @@ def limit_order(req: LimitOrderRequest, x_signer_api_key: Optional[str] = Header
     require_api_key(x_signer_api_key)
     exchange = get_exchange(req.agent_private_key, req.wallet_address)
     order_type = {"limit": {"tif": req.tif}}
+    builder = get_builder()
     return exchange.order(
         name=req.coin,
         is_buy=req.is_buy,
@@ -121,6 +133,7 @@ def limit_order(req: LimitOrderRequest, x_signer_api_key: Optional[str] = Header
         limit_px=req.limit_px,
         order_type=order_type,
         reduce_only=req.reduce_only,
+        builder=builder,
     )
 
 
@@ -128,12 +141,14 @@ def limit_order(req: LimitOrderRequest, x_signer_api_key: Optional[str] = Header
 def market_open(req: MarketOrderRequest, x_signer_api_key: Optional[str] = Header(default=None)):
     require_api_key(x_signer_api_key)
     exchange = get_exchange(req.agent_private_key, req.wallet_address)
+    builder = get_builder()
     return exchange.market_open(
         name=req.coin,
         is_buy=req.is_buy,
         sz=req.size,
         px=req.px,
         slippage=req.slippage,
+        builder=builder,
     )
 
 
@@ -141,11 +156,13 @@ def market_open(req: MarketOrderRequest, x_signer_api_key: Optional[str] = Heade
 def market_close(req: MarketCloseRequest, x_signer_api_key: Optional[str] = Header(default=None)):
     require_api_key(x_signer_api_key)
     exchange = get_exchange(req.agent_private_key, req.wallet_address)
+    builder = get_builder()
     return exchange.market_close(
         coin=req.coin,
         sz=req.size,
         px=req.px,
         slippage=req.slippage,
+        builder=builder,
     )
 
 

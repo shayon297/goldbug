@@ -14,6 +14,10 @@ import {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
+// Builder fee configuration - address that receives trading fees
+const BUILDER_ADDRESS = process.env.NEXT_PUBLIC_BUILDER_ADDRESS || '';
+const BUILDER_MAX_FEE_RATE = '0.1%'; // Maximum 0.1% (10 bps)
+
 // Arbitrum USDC and Hyperliquid Bridge
 const ARBITRUM_RPC = 'https://arb1.arbitrum.io/rpc';
 const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'; // Native USDC on Arbitrum
@@ -333,6 +337,89 @@ export default function Home() {
           // Don't throw - we'll register the user and they can /reauth after depositing
         } else {
           throw new Error(`Agent approval failed: ${errorMsg}`);
+        }
+      }
+
+      // Approve builder fee if builder address is configured and user has funds
+      if (agentApproved && BUILDER_ADDRESS && BUILDER_ADDRESS !== '0x...your_builder_wallet_address') {
+        try {
+          console.log('[MiniApp] Approving builder fee for:', BUILDER_ADDRESS);
+          
+          const builderNonce = Date.now();
+          
+          // EIP-712 message for ApproveBuilderFee
+          const builderEip712Message = {
+            hyperliquidChain: 'Mainnet',
+            maxFeeRate: BUILDER_MAX_FEE_RATE,
+            builder: BUILDER_ADDRESS.toLowerCase(),
+            nonce: builderNonce,
+          };
+          
+          // EIP-712 typed data for ApproveBuilderFee
+          const builderTypedData = {
+            domain: {
+              name: 'HyperliquidSignTransaction',
+              version: '1',
+              chainId: 42161, // Arbitrum One mainnet
+              verifyingContract: '0x0000000000000000000000000000000000000000',
+            },
+            types: {
+              'HyperliquidTransaction:ApproveBuilderFee': [
+                { name: 'hyperliquidChain', type: 'string' },
+                { name: 'maxFeeRate', type: 'string' },
+                { name: 'builder', type: 'address' },
+                { name: 'nonce', type: 'uint64' },
+              ],
+            },
+            primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
+            message: builderEip712Message,
+          };
+          
+          console.log('[MiniApp] Signing builder fee approval:', JSON.stringify(builderTypedData, null, 2));
+          
+          const builderSignature = await provider.request({
+            method: 'eth_signTypedData_v4',
+            params: [embeddedWallet.address, JSON.stringify(builderTypedData)],
+          });
+
+          const builderSig = ethers.Signature.from(builderSignature as string);
+          
+          // Send approveBuilderFee to Hyperliquid
+          const builderApiAction = {
+            type: 'approveBuilderFee',
+            hyperliquidChain: 'Mainnet',
+            signatureChainId: signatureChainId,
+            maxFeeRate: BUILDER_MAX_FEE_RATE,
+            builder: BUILDER_ADDRESS.toLowerCase(),
+            nonce: builderNonce,
+          };
+          
+          const builderRequestBody = {
+            action: builderApiAction,
+            nonce: builderNonce,
+            signature: { r: builderSig.r, s: builderSig.s, v: builderSig.v },
+          };
+          
+          console.log('[MiniApp] Sending builder fee approval to Hyperliquid:', JSON.stringify(builderRequestBody, null, 2));
+          
+          const builderHlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(builderRequestBody),
+          });
+
+          const builderHlResult = await builderHlResponse.json();
+          console.log('[Hyperliquid] approveBuilderFee result:', JSON.stringify(builderHlResult));
+          
+          if (builderHlResult.status === 'ok') {
+            console.log('[Hyperliquid] Builder fee approved successfully');
+          } else {
+            // Non-fatal - trading will still work, just without builder fee
+            console.warn('[Hyperliquid] Builder fee approval failed:', builderHlResult.response || builderHlResult);
+          }
+        } catch (builderError) {
+          // Non-fatal - log and continue
+          console.warn('[MiniApp] Builder fee approval error:', builderError);
         }
       }
 

@@ -211,6 +211,40 @@ npm test --workspace=@goldbug/backend
 # - Hyperliquid adapter (mocked API calls)
 ```
 
+## Builder Fees (Monetization)
+
+The bot supports Hyperliquid Builder Codes, allowing you to earn up to 0.1% on every trade.
+
+### Setup
+
+1. **Create a builder wallet** - This wallet will receive fee revenue
+2. **Deposit at least 100 USDC** into the builder wallet on Hyperliquid
+3. **Configure environment variables**:
+
+```bash
+# Signer service
+BUILDER_ADDRESS=0x...your_wallet_address
+BUILDER_FEE_BPS=100  # 100 = 0.1% (10 basis points)
+
+# Mini App (for user approval)
+NEXT_PUBLIC_BUILDER_ADDRESS=0x...your_wallet_address
+```
+
+### How It Works
+
+1. When users authorize trading, they also approve your builder address
+2. Every trade includes the builder fee automatically
+3. Fees accrue in your Hyperliquid referral rewards
+4. Claim fees at [app.hyperliquid.xyz/referrals](https://app.hyperliquid.xyz/referrals)
+
+### Revenue Calculation
+
+| Daily Volume | Revenue (0.1%) |
+|--------------|----------------|
+| $10,000 | $10/day |
+| $100,000 | $100/day |
+| $1,000,000 | $1,000/day |
+
 ## Environment Variables
 
 ### Backend
@@ -228,12 +262,23 @@ npm test --workspace=@goldbug/backend
 | `BACKEND_URL` | Public URL for webhook |
 | `MINIAPP_URL` | Mini app URL for buttons |
 
+### Signer Service
+
+| Variable | Description |
+|----------|-------------|
+| `HYPERLIQUID_API_URL` | `https://api.hyperliquid.xyz` |
+| `TRADING_ASSET` | `xyz:GOLD` for trade.xyz GOLD |
+| `SIGNER_API_KEY` | Optional shared key for auth |
+| `BUILDER_ADDRESS` | Your builder wallet address |
+| `BUILDER_FEE_BPS` | Fee in tenths of bps (100 = 0.1%) |
+
 ### Mini App
 
 | Variable | Description |
 |----------|-------------|
 | `NEXT_PUBLIC_PRIVY_APP_ID` | Privy app ID |
 | `NEXT_PUBLIC_API_URL` | Backend API URL |
+| `NEXT_PUBLIC_BUILDER_ADDRESS` | Builder wallet for fee approval |
 
 ## License
 
