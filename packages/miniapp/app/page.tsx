@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { usePrivy, useWallets, useFundWallet } from '@privy-io/react-auth';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { Wallet, ethers, Contract, formatUnits, parseUnits } from 'ethers';
 import { arbitrum } from 'viem/chains';
 import {
@@ -9,6 +9,7 @@ import {
   getTelegramInitData,
   closeMiniApp,
   expandMiniApp,
+  openExternalLink,
 } from '@/lib/telegram';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
@@ -32,7 +33,6 @@ export default function Home() {
   const privy = usePrivy();
   const { ready, authenticated, login, getAccessToken } = privy;
   const { wallets } = useWallets();
-  const { fundWallet } = useFundWallet();
 
   const [step, setStep] = useState<Step>('init');
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +44,6 @@ export default function Home() {
   const [wantsBridge, setWantsBridge] = useState(false);
   const [wantsReauth, setWantsReauth] = useState(false);
   const [wantsOnramp, setWantsOnramp] = useState(false);
-  const [isFunding, setIsFunding] = useState(false);
   const checkedUrl = useRef(false);
 
   // Initialize Telegram Web App and check URL params
@@ -83,7 +82,7 @@ export default function Home() {
     if (!ready) return;
     // Don't reset these steps - they should persist until user action
     if (step === 'bridge' || step === 'bridging' || step === 'bridged' || step === 'onramp' ||
-        step === 'registering' || step === 'error' || step === 'success' || isFunding) return;
+        step === 'registering' || step === 'error' || step === 'success') return;
 
     if (authenticated && wallets.length > 0) {
       if (wantsBridge) {
@@ -106,7 +105,7 @@ export default function Home() {
         setStep('login');
       }
     }
-  }, [ready, authenticated, wallets, wantsBridge, wantsReauth, wantsOnramp, step, isFunding]);
+  }, [ready, authenticated, wallets, wantsBridge, wantsReauth, wantsOnramp, step]);
 
   // Handle login
   const handleLogin = useCallback(async () => {
@@ -118,14 +117,8 @@ export default function Home() {
     }
   }, [login]);
 
-  const handlePrivyFunding = useCallback(async () => {
-    // Ensure user is authenticated
-    if (!authenticated) {
-      setError('Please log in to fund your wallet.');
-      setStep('login');
-      return;
-    }
-
+  // Open MoonPay in external browser (Privy modal doesn't work in Telegram WebView)
+  const handleMoonPayFunding = useCallback(() => {
     // Get embedded wallet address
     const embeddedWallet = wallets.find((w) => w.walletClientType === 'privy');
     const address = embeddedWallet?.address || wallets[0]?.address;
@@ -136,51 +129,28 @@ export default function Home() {
       return;
     }
 
-    if (!fundWallet) {
-      setError('Privy funding is not available. Please refresh the page.');
+    // MoonPay API key from environment
+    const moonpayApiKey = process.env.NEXT_PUBLIC_MOONPAY_API_KEY;
+    
+    if (!moonpayApiKey) {
+      setError('MoonPay is not configured. Please contact support.');
       setStep('error');
       return;
     }
 
-    setIsFunding(true);
-    setError(null);
+    // Construct MoonPay URL for USDC on Arbitrum
+    const moonpayUrl = new URL('https://buy.moonpay.com');
+    moonpayUrl.searchParams.set('apiKey', moonpayApiKey);
+    moonpayUrl.searchParams.set('currencyCode', 'usdc_arbitrum');
+    moonpayUrl.searchParams.set('walletAddress', address);
+    moonpayUrl.searchParams.set('baseCurrencyCode', 'usd');
+    moonpayUrl.searchParams.set('defaultCurrencyCode', 'usdc_arbitrum');
 
-    try {
-      console.log('[MiniApp] Calling fundWallet with:', {
-        address,
-        chain: arbitrum.id,
-        asset: 'USDC',
-        amount: '10',
-        provider: 'moonpay',
-      });
+    console.log('[MiniApp] Opening MoonPay:', moonpayUrl.toString());
 
-      await fundWallet({
-        address,
-        options: {
-          chain: arbitrum,
-          asset: 'USDC',
-          amount: '10',
-          defaultFundingMethod: 'card',
-          card: {
-            preferredProvider: 'moonpay',
-          },
-          uiConfig: {
-            receiveFundsTitle: 'Buy USDC on Arbitrum',
-            receiveFundsSubtitle: 'Fund your wallet with MoonPay',
-          },
-        },
-      });
-
-      console.log('[MiniApp] Funding modal opened successfully');
-      // Don't change step - let Privy modal handle the flow
-    } catch (err) {
-      setIsFunding(false);
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error('[MiniApp] Privy funding failed:', err);
-      setError(`Funding failed: ${errorMessage}. Please try again or check Privy Dashboard configuration.`);
-      setStep('error');
-    }
-  }, [wallets, fundWallet, authenticated]);
+    // Open in external browser (outside Telegram WebView)
+    openExternalLink(moonpayUrl.toString());
+  }, [wallets]);
 
   // Handle agent authorization and registration
   const handleAuthorize = useCallback(async () => {
@@ -574,16 +544,16 @@ export default function Home() {
             <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4 mb-4 text-left">
               <p className="text-zinc-200 font-semibold text-sm mb-2">💳 Add Funds (USDC on Arbitrum)</p>
               <p className="text-xs text-zinc-400 mb-3">
-                MoonPay via Privy. KYC may be required depending on your region.
+                Buy USDC with MoonPay. KYC may be required.
               </p>
 
               <button
-                onClick={handlePrivyFunding}
-                disabled={isFunding}
-                className="w-full block bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
+                onClick={handleMoonPayFunding}
+                className="w-full block bg-blue-600 hover:bg-blue-500 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
               >
-                {isFunding ? 'Opening MoonPay...' : '💳 Buy USDC with MoonPay'}
+                💳 Buy USDC with MoonPay
               </button>
+              <p className="text-xs text-zinc-500 mt-1">Opens in external browser</p>
             </div>
 
             <p className="text-zinc-400 text-sm mb-4">
@@ -647,19 +617,14 @@ export default function Home() {
                 )}
 
                 <button
-                  onClick={handlePrivyFunding}
-                  disabled={isFunding}
-                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2"
+                  onClick={handleMoonPayFunding}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2"
                 >
-                  {isFunding ? (
-                    <>
-                      <div className="spinner w-4 h-4" />
-                      Opening MoonPay...
-                    </>
-                  ) : (
-                    '💳 Buy USDC with MoonPay'
-                  )}
+                  💳 Buy USDC with MoonPay
                 </button>
+                <p className="text-xs text-zinc-500 mt-2">
+                  Opens in external browser
+                </p>
               </div>
             )}
 

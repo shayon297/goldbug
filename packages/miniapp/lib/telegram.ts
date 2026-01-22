@@ -87,3 +87,20 @@ export function setMainButtonLoading(loading: boolean): void {
   }
 }
 
+/**
+ * Open a link in the system browser (outside the WebView)
+ * This is required for flows that don't work in Telegram's WebView (like Privy modals)
+ */
+export function openExternalLink(url: string): void {
+  if (typeof window === 'undefined') return;
+
+  const tg = (window as any).Telegram?.WebApp;
+  if (tg?.openLink) {
+    // Opens in external browser
+    tg.openLink(url);
+  } else {
+    // Fallback for non-Telegram environment
+    window.open(url, '_blank');
+  }
+}
+
