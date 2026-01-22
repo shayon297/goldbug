@@ -288,6 +288,18 @@ export class HyperliquidClient {
       tif = 'Gtc';
     }
 
+    // Enable dex abstraction for HIP-3 assets (required to use main perps balance)
+    if (ASSET_CONFIG.dex) {
+      try {
+        await this.signerRequest('/l1/enable_dex', {
+          agent_private_key: agentPrivateKey,
+          wallet_address: walletAddress,
+        });
+      } catch (e) {
+        console.log('[Hyperliquid] Dex abstraction enable may have failed:', e);
+      }
+    }
+
     // Update leverage first (isolated for HIP-3)
     await this.updateLeverage(agentPrivateKey, walletAddress, params.leverage, false);
 

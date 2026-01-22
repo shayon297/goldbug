@@ -155,3 +155,10 @@ def cancel(req: CancelOrderRequest, x_signer_api_key: Optional[str] = Header(def
     exchange = get_exchange(req.agent_private_key, req.wallet_address)
     return exchange.cancel(req.coin, req.oid)
 
+
+@app.post("/l1/enable_dex")
+def enable_dex_abstraction(req: BaseRequest, x_signer_api_key: Optional[str] = Header(default=None)):
+    require_api_key(x_signer_api_key)
+    exchange = get_exchange(req.agent_private_key, req.wallet_address)
+    return exchange.agent_enable_dex_abstraction()
+
