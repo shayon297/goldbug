@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy, useWallets, useFundWallet } from '@privy-io/react-auth';
 import { Wallet, ethers, Contract, formatUnits, parseUnits } from 'ethers';
+import { arbitrum } from 'viem/chains';
 import {
   getTelegramUser,
   getTelegramInitData,
@@ -28,8 +29,10 @@ const ERC20_ABI = [
 type Step = 'init' | 'login' | 'authorize' | 'registering' | 'success' | 'bridge' | 'bridging' | 'bridged' | 'onramp' | 'error';
 
 export default function Home() {
-  const { ready, authenticated, login, getAccessToken } = usePrivy();
+  const privy = usePrivy();
+  const { ready, authenticated, login, getAccessToken } = privy;
   const { wallets } = useWallets();
+  const { fundWallet } = useFundWallet();
 
   const [step, setStep] = useState<Step>('init');
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +44,7 @@ export default function Home() {
   const [wantsBridge, setWantsBridge] = useState(false);
   const [wantsReauth, setWantsReauth] = useState(false);
   const [wantsOnramp, setWantsOnramp] = useState(false);
+  const [isFunding, setIsFunding] = useState(false);
   const checkedUrl = useRef(false);
 
   // Initialize Telegram Web App and check URL params
@@ -79,7 +83,7 @@ export default function Home() {
     if (!ready) return;
     // Don't reset these steps - they should persist until user action
     if (step === 'bridge' || step === 'bridging' || step === 'bridged' || step === 'onramp' ||
-        step === 'registering' || step === 'error' || step === 'success') return;
+        step === 'registering' || step === 'error' || step === 'success' || isFunding) return;
 
     if (authenticated && wallets.length > 0) {
       if (wantsBridge) {
@@ -95,9 +99,14 @@ export default function Home() {
         setStep('authorize');
       }
     } else if (!authenticated) {
-      setStep('login');
+      // If user wants onramp but not authenticated, go to login
+      if (wantsOnramp) {
+        setStep('login');
+      } else {
+        setStep('login');
+      }
     }
-  }, [ready, authenticated, wallets, wantsBridge, wantsReauth, wantsOnramp, step]);
+  }, [ready, authenticated, wallets, wantsBridge, wantsReauth, wantsOnramp, step, isFunding]);
 
   // Handle login
   const handleLogin = useCallback(async () => {
@@ -108,6 +117,70 @@ export default function Home() {
       setStep('error');
     }
   }, [login]);
+
+  const handlePrivyFunding = useCallback(async () => {
+    // Ensure user is authenticated
+    if (!authenticated) {
+      setError('Please log in to fund your wallet.');
+      setStep('login');
+      return;
+    }
+
+    // Get embedded wallet address
+    const embeddedWallet = wallets.find((w) => w.walletClientType === 'privy');
+    const address = embeddedWallet?.address || wallets[0]?.address;
+    
+    if (!address) {
+      setError('No wallet address available. Please connect a wallet first.');
+      setStep('error');
+      return;
+    }
+
+    if (!fundWallet) {
+      setError('Privy funding is not available. Please refresh the page.');
+      setStep('error');
+      return;
+    }
+
+    setIsFunding(true);
+    setError(null);
+
+    try {
+      console.log('[MiniApp] Calling fundWallet with:', {
+        address,
+        chain: arbitrum.id,
+        asset: 'USDC',
+        amount: '10',
+        provider: 'moonpay',
+      });
+
+      await fundWallet({
+        address,
+        options: {
+          chain: arbitrum,
+          asset: 'USDC',
+          amount: '10',
+          defaultFundingMethod: 'card',
+          card: {
+            preferredProvider: 'moonpay',
+          },
+          uiConfig: {
+            receiveFundsTitle: 'Buy USDC on Arbitrum',
+            receiveFundsSubtitle: 'Fund your wallet with MoonPay',
+          },
+        },
+      });
+
+      console.log('[MiniApp] Funding modal opened successfully');
+      // Don't change step - let Privy modal handle the flow
+    } catch (err) {
+      setIsFunding(false);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error('[MiniApp] Privy funding failed:', err);
+      setError(`Funding failed: ${errorMessage}. Please try again or check Privy Dashboard configuration.`);
+      setStep('error');
+    }
+  }, [wallets, fundWallet, authenticated]);
 
   // Handle agent authorization and registration
   const handleAuthorize = useCallback(async () => {
@@ -501,29 +574,16 @@ export default function Home() {
             <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4 mb-4 text-left">
               <p className="text-zinc-200 font-semibold text-sm mb-2">💳 Add Funds (USDC on Arbitrum)</p>
               <p className="text-xs text-zinc-400 mb-3">
-                KYC may be required depending on your region. If one provider blocks, try another.
+                MoonPay via Privy. KYC may be required depending on your region.
               </p>
 
-              <div className="space-y-2">
-                <a
-                  href={`https://buy.moonpay.com?apiKey=${process.env.NEXT_PUBLIC_MOONPAY_API_KEY}&currencyCode=usdc&walletAddress=${registeredWallet || wallets[0]?.address}&baseCurrencyCode=usd&network=arbitrum`}
-                  className="w-full block bg-gold-500 hover:bg-gold-400 text-black py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
-                >
-                  MoonPay
-                </a>
-                <a
-                  href={`https://buy.ramp.network/?hostApiKey=${process.env.NEXT_PUBLIC_RAMP_WIDGET_HOST}&swapAsset=USDC&userAddress=${registeredWallet || wallets[0]?.address}&network=ARBITRUM`}
-                  className="w-full block bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
-                >
-                  Ramp
-                </a>
-                <a
-                  href={`https://global.transak.com/?apiKey=${process.env.NEXT_PUBLIC_TRANSAK_API_KEY}&cryptoCurrencyCode=USDC&network=arbitrum&walletAddress=${registeredWallet || wallets[0]?.address}`}
-                  className="w-full block bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
-                >
-                  Transak
-                </a>
-              </div>
+              <button
+                onClick={handlePrivyFunding}
+                disabled={isFunding}
+                className="w-full block bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
+              >
+                {isFunding ? 'Opening MoonPay...' : '💳 Buy USDC with MoonPay'}
+              </button>
             </div>
 
             <p className="text-zinc-400 text-sm mb-4">
@@ -542,33 +602,71 @@ export default function Home() {
             <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
               <span className="text-3xl">💳</span>
             </div>
-            <h2 className="text-xl font-semibold mb-2">Add Funds</h2>
+            <h2 className="text-xl font-semibold mb-2">Buy USDC</h2>
             <p className="text-zinc-400 text-sm mb-4">
-              Buy USDC on Arbitrum. KYC may be required depending on region.
+              Fund your wallet with USDC on Arbitrum using MoonPay. KYC may be required depending on your region.
             </p>
 
-            <div className="space-y-2 mb-4">
-              <a
-                href={`https://buy.moonpay.com?apiKey=${process.env.NEXT_PUBLIC_MOONPAY_API_KEY}&currencyCode=usdc&walletAddress=${wallets[0]?.address}&baseCurrencyCode=usd&network=arbitrum`}
-                className="w-full block bg-gold-500 hover:bg-gold-400 text-black py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
-              >
-                MoonPay
-              </a>
-              <a
-                href={`https://buy.ramp.network/?hostApiKey=${process.env.NEXT_PUBLIC_RAMP_WIDGET_HOST}&swapAsset=USDC&userAddress=${wallets[0]?.address}&network=ARBITRUM`}
-                className="w-full block bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
-              >
-                Ramp
-              </a>
-              <a
-                href={`https://global.transak.com/?apiKey=${process.env.NEXT_PUBLIC_TRANSAK_API_KEY}&cryptoCurrencyCode=USDC&network=arbitrum&walletAddress=${wallets[0]?.address}`}
-                className="w-full block bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
-              >
-                Transak
-              </a>
-            </div>
+            {!authenticated ? (
+              <div className="space-y-3">
+                <p className="text-zinc-500 text-sm mb-4">
+                  Please log in to fund your wallet.
+                </p>
+                <button
+                  onClick={handleLogin}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 px-4 rounded-lg font-semibold transition"
+                >
+                  Log In
+                </button>
+              </div>
+            ) : wallets.length === 0 ? (
+              <div className="space-y-3">
+                <p className="text-zinc-500 text-sm mb-4">
+                  No wallet found. Please connect a wallet first.
+                </p>
+                <button
+                  onClick={() => setStep('authorize')}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 px-4 rounded-lg font-semibold transition"
+                >
+                  Connect Wallet
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="bg-zinc-800/50 rounded-lg p-3 mb-4 text-left">
+                  <p className="text-xs text-zinc-500 mb-1">Wallet Address</p>
+                  <p className="text-sm font-mono text-zinc-300 break-all">
+                    {wallets.find((w) => w.walletClientType === 'privy')?.address || wallets[0]?.address}
+                  </p>
+                </div>
 
-            <button onClick={() => closeMiniApp()} className="btn-gold w-full">
+                {error && (
+                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4">
+                    <p className="text-red-400 text-sm">{error}</p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handlePrivyFunding}
+                  disabled={isFunding}
+                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2"
+                >
+                  {isFunding ? (
+                    <>
+                      <div className="spinner w-4 h-4" />
+                      Opening MoonPay...
+                    </>
+                  ) : (
+                    '💳 Buy USDC with MoonPay'
+                  )}
+                </button>
+              </div>
+            )}
+
+            <button 
+              onClick={() => closeMiniApp()} 
+              className="mt-4 w-full bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm transition"
+            >
               Return to Telegram
             </button>
           </div>
