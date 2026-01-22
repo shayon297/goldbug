@@ -13,6 +13,7 @@ import {
   settingsKeyboard,
   ordersKeyboard,
   closeConfirmKeyboard,
+  authorizeKeyboard,
 } from './keyboards.js';
 import { parseTradeCommand, formatTradeCommand, sanitizeInput } from './parser.js';
 import {
@@ -792,11 +793,34 @@ export function registerHandlers(bot: Telegraf) {
           );
         }
       } else {
-        await ctx.editMessageText(`❌ Order failed: ${result.error || 'Unknown error'}`, mainMenuKeyboard());
+        const errorMsg = result.error || 'Unknown error';
+        
+        // Check if agent not approved on Hyperliquid (user deposited but hasn't authorized yet)
+        if (errorMsg.includes('does not exist') || errorMsg.includes('User or API Wallet')) {
+          await ctx.editMessageText(
+            `🔐 *Authorization Required*\n\n` +
+            `Your wallet has funds but trading isn't enabled yet.\n` +
+            `Tap below to authorize trading:`,
+            { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
+          );
+        } else {
+          await ctx.editMessageText(`❌ Order failed: ${errorMsg}`, mainMenuKeyboard());
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+      
+      // Check if agent not approved on Hyperliquid
+      if (message.includes('does not exist') || message.includes('User or API Wallet')) {
+        await ctx.editMessageText(
+          `🔐 *Authorization Required*\n\n` +
+          `Your wallet has funds but trading isn't enabled yet.\n` +
+          `Tap below to authorize trading:`,
+          { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
+        );
+      } else {
+        await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+      }
     }
   });
 
@@ -832,11 +856,34 @@ export function registerHandlers(bot: Telegraf) {
           await ctx.editMessageText('Position closed.', mainMenuKeyboard());
         }
       } else {
-        await ctx.editMessageText(`❌ Failed to close: ${result.error || 'Unknown error'}`, mainMenuKeyboard());
+        const errorMsg = result.error || 'Unknown error';
+        
+        // Check if agent not approved on Hyperliquid
+        if (errorMsg.includes('does not exist') || errorMsg.includes('User or API Wallet')) {
+          await ctx.editMessageText(
+            `🔐 *Authorization Required*\n\n` +
+            `Your wallet has funds but trading isn't enabled yet.\n` +
+            `Tap below to authorize trading:`,
+            { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
+          );
+        } else {
+          await ctx.editMessageText(`❌ Failed to close: ${errorMsg}`, mainMenuKeyboard());
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+      
+      // Check if agent not approved on Hyperliquid
+      if (message.includes('does not exist') || message.includes('User or API Wallet')) {
+        await ctx.editMessageText(
+          `🔐 *Authorization Required*\n\n` +
+          `Your wallet has funds but trading isn't enabled yet.\n` +
+          `Tap below to authorize trading:`,
+          { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
+        );
+      } else {
+        await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+      }
     }
   });
 

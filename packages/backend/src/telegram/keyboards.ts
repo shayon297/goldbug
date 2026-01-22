@@ -162,3 +162,11 @@ export function closeConfirmKeyboard() {
   ]);
 }
 
+// Authorize trading (for users who deposited but haven't authorized agent yet)
+export function authorizeKeyboard(miniAppUrl: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.webApp('🔐 Authorize Trading', `${miniAppUrl}?action=reauth`)],
+    [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+
