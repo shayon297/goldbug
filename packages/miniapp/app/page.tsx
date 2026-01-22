@@ -25,7 +25,7 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)',
 ];
 
-type Step = 'init' | 'login' | 'authorize' | 'registering' | 'success' | 'bridge' | 'bridging' | 'bridged' | 'error';
+type Step = 'init' | 'login' | 'authorize' | 'registering' | 'success' | 'bridge' | 'bridging' | 'bridged' | 'onramp' | 'error';
 
 export default function Home() {
   const { ready, authenticated, login, getAccessToken } = usePrivy();
@@ -40,6 +40,7 @@ export default function Home() {
   const [ethBalance, setEthBalance] = useState<string>('0');
   const [wantsBridge, setWantsBridge] = useState(false);
   const [wantsReauth, setWantsReauth] = useState(false);
+  const [wantsOnramp, setWantsOnramp] = useState(false);
   const checkedUrl = useRef(false);
 
   // Initialize Telegram Web App and check URL params
@@ -61,6 +62,9 @@ export default function Home() {
       } else if (action === 'reauth') {
         console.log('[MiniApp] Reauth action detected');
         setWantsReauth(true);
+      } else if (action === 'onramp') {
+        console.log('[MiniApp] Onramp action detected');
+        setWantsOnramp(true);
       }
     }
 
@@ -74,13 +78,16 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     // Don't reset these steps - they should persist until user action
-    if (step === 'bridge' || step === 'bridging' || step === 'bridged' || 
+    if (step === 'bridge' || step === 'bridging' || step === 'bridged' || step === 'onramp' ||
         step === 'registering' || step === 'error' || step === 'success') return;
 
     if (authenticated && wallets.length > 0) {
       if (wantsBridge) {
         console.log('[MiniApp] Going to bridge step');
         setStep('bridge');
+      } else if (wantsOnramp) {
+        console.log('[MiniApp] Going to onramp step');
+        setStep('onramp');
       } else if (wantsReauth) {
         console.log('[MiniApp] Going to authorize step for reauth');
         setStep('authorize');
@@ -90,7 +97,7 @@ export default function Home() {
     } else if (!authenticated) {
       setStep('login');
     }
-  }, [ready, authenticated, wallets, wantsBridge, wantsReauth, step]);
+  }, [ready, authenticated, wallets, wantsBridge, wantsReauth, wantsOnramp, step]);
 
   // Handle login
   const handleLogin = useCallback(async () => {
@@ -490,26 +497,76 @@ export default function Home() {
               </div>
             )}
 
-            {/* One-Click Bridge */}
-            <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-4 mb-4 text-left">
-              <p className="text-amber-400 font-semibold text-sm mb-2">💰 Fund Your Wallet</p>
-              <p className="text-xs text-zinc-300 mb-3">
-                Have USDC on Arbitrum? Bridge directly to Hyperliquid:
+            {/* Onramp Selector */}
+            <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4 mb-4 text-left">
+              <p className="text-zinc-200 font-semibold text-sm mb-2">💳 Add Funds (USDC on Arbitrum)</p>
+              <p className="text-xs text-zinc-400 mb-3">
+                KYC may be required depending on your region. If one provider blocks, try another.
               </p>
-              <button 
-                onClick={handleBridgeClick} 
-                className="w-full bg-amber-600 hover:bg-amber-500 text-white py-2 px-4 rounded-lg font-semibold text-sm transition"
-              >
-                🌉 Bridge USDC to Hyperliquid
-              </button>
-              <p className="text-xs text-zinc-500 mt-2">
-                Requires USDC + small ETH for gas on Arbitrum
-              </p>
+
+              <div className="space-y-2">
+                <a
+                  href={`https://buy.moonpay.com?apiKey=${process.env.NEXT_PUBLIC_MOONPAY_API_KEY}&currencyCode=usdc&walletAddress=${registeredWallet || wallets[0]?.address}&baseCurrencyCode=usd&network=arbitrum`}
+                  className="w-full block bg-gold-500 hover:bg-gold-400 text-black py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
+                >
+                  MoonPay
+                </a>
+                <a
+                  href={`https://buy.ramp.network/?hostApiKey=${process.env.NEXT_PUBLIC_RAMP_WIDGET_HOST}&swapAsset=USDC&userAddress=${registeredWallet || wallets[0]?.address}&network=ARBITRUM`}
+                  className="w-full block bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
+                >
+                  Ramp
+                </a>
+                <a
+                  href={`https://global.transak.com/?apiKey=${process.env.NEXT_PUBLIC_TRANSAK_API_KEY}&cryptoCurrencyCode=USDC&network=arbitrum&walletAddress=${registeredWallet || wallets[0]?.address}`}
+                  className="w-full block bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
+                >
+                  Transak
+                </a>
+              </div>
             </div>
 
             <p className="text-zinc-400 text-sm mb-4">
               Once funded, trade xyz:GOLD in Telegram!
             </p>
+
+            <button onClick={() => closeMiniApp()} className="btn-gold w-full">
+              Return to Telegram
+            </button>
+          </div>
+        )}
+
+        {/* Onramp Step */}
+        {step === 'onramp' && (
+          <div className="text-center">
+            <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-3xl">💳</span>
+            </div>
+            <h2 className="text-xl font-semibold mb-2">Add Funds</h2>
+            <p className="text-zinc-400 text-sm mb-4">
+              Buy USDC on Arbitrum. KYC may be required depending on region.
+            </p>
+
+            <div className="space-y-2 mb-4">
+              <a
+                href={`https://buy.moonpay.com?apiKey=${process.env.NEXT_PUBLIC_MOONPAY_API_KEY}&currencyCode=usdc&walletAddress=${wallets[0]?.address}&baseCurrencyCode=usd&network=arbitrum`}
+                className="w-full block bg-gold-500 hover:bg-gold-400 text-black py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
+              >
+                MoonPay
+              </a>
+              <a
+                href={`https://buy.ramp.network/?hostApiKey=${process.env.NEXT_PUBLIC_RAMP_WIDGET_HOST}&swapAsset=USDC&userAddress=${wallets[0]?.address}&network=ARBITRUM`}
+                className="w-full block bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
+              >
+                Ramp
+              </a>
+              <a
+                href={`https://global.transak.com/?apiKey=${process.env.NEXT_PUBLIC_TRANSAK_API_KEY}&cryptoCurrencyCode=USDC&network=arbitrum&walletAddress=${wallets[0]?.address}`}
+                className="w-full block bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
+              >
+                Transak
+              </a>
+            </div>
 
             <button onClick={() => closeMiniApp()} className="btn-gold w-full">
               Return to Telegram

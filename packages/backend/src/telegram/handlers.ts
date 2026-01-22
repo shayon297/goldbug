@@ -268,6 +268,29 @@ export function registerHandlers(bot: Telegraf) {
     );
   });
 
+  // /onramp command - open Mini App on onramp selector
+  bot.command('onramp', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    await ctx.replyWithMarkdown(
+      `💳 *Buy USDC (Arbitrum)*\n\n` +
+      `Tap below to choose an onramp provider. KYC may be required depending on region.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💳 Open Onramp', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+          ],
+        },
+      }
+    );
+  });
+
   // /position command
   bot.command('position', async (ctx) => {
     const telegramId = BigInt(ctx.from.id);

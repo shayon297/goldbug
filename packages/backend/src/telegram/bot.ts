@@ -14,6 +14,7 @@ const BOT_COMMANDS = [
   { command: 'fills', description: 'View recent fills' },
   { command: 'balance', description: 'Check account balance' },
   { command: 'bridge', description: '🌉 Bridge USDC to Hyperliquid' },
+  { command: 'onramp', description: '💳 Buy USDC (Arbitrum)' },
   { command: 'deposit', description: 'How to fund your wallet' },
   { command: 'close', description: 'Close your position' },
   { command: 'cancel', description: 'Cancel all open orders' },
