@@ -5,8 +5,8 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { ethers } from 'ethers';
 import { createBot, startBot } from './telegram/bot.js';
-import { prisma, createUser } from './state/db.js';
-import { getHyperliquidClient } from './hyperliquid/client.js';
+import { prisma, createUser, getAllUsers } from './state/db.js';
+import { getHyperliquidClient, TRADING_ASSET } from './hyperliquid/client.js';
 import {
   verifyPrivyToken,
   RegistrationRequestSchema,
@@ -192,6 +192,54 @@ async function main() {
   } else {
     await startBot(bot);
   }
+
+  // Hourly (6h) position updates
+  const POSITION_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+  let positionUpdateRunning = false;
+
+  async function sendPositionUpdates() {
+    if (positionUpdateRunning) return;
+    positionUpdateRunning = true;
+
+    try {
+      const hl = await getHyperliquidClient();
+      const users = await getAllUsers();
+
+      for (const user of users) {
+        try {
+          const position = await hl.getGoldPosition(user.walletAddress);
+          if (!position || parseFloat(position.position.szi) === 0) {
+            continue;
+          }
+
+          const side = parseFloat(position.position.szi) > 0 ? 'LONG' : 'SHORT';
+          const size = Math.abs(parseFloat(position.position.szi)).toFixed(4);
+          const entry = parseFloat(position.position.entryPx || '0').toFixed(2);
+          const pnl = parseFloat(position.position.unrealizedPnl || '0').toFixed(2);
+          const leverage = position.position.leverage?.value ?? 0;
+          const liq = position.position.liquidationPx ? parseFloat(position.position.liquidationPx).toFixed(2) : 'N/A';
+          const price = await hl.getGoldPrice();
+
+          const message =
+            `📊 *${TRADING_ASSET} Position Update*\n\n` +
+            `📈 *${side}* ${size} ${TRADING_ASSET}\n` +
+            `💵 Entry: $${entry}\n` +
+            `⚖️ Leverage: ${leverage}x\n` +
+            `🟢 PnL: $${pnl}\n` +
+            `⚠️ Liquidation: $${liq}\n` +
+            `💲 Price: $${price.toFixed(2)}`;
+
+          await bot.telegram.sendMessage(Number(user.telegramId), message, { parse_mode: 'Markdown' });
+        } catch (err) {
+          console.error('[Notifs] Failed for user', user.telegramId.toString(), err);
+        }
+      }
+    } finally {
+      positionUpdateRunning = false;
+    }
+  }
+
+  setInterval(sendPositionUpdates, POSITION_UPDATE_INTERVAL_MS);
 
   // Graceful shutdown
   const shutdown = async () => {

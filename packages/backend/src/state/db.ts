@@ -106,6 +106,15 @@ export async function updateUserPreferences(
   });
 }
 
+export async function getAllUsers(): Promise<Array<{ telegramId: bigint; walletAddress: string }>> {
+  return prisma.user.findMany({
+    select: {
+      telegramId: true,
+      walletAddress: true,
+    },
+  });
+}
+
 /**
  * Session management for order flow state
  */
