@@ -8,6 +8,7 @@ import {
   orderTypeKeyboard,
   confirmOrderKeyboard,
   postOrderKeyboard,
+  balanceKeyboard,
   positionKeyboard,
   settingsKeyboard,
   ordersKeyboard,
@@ -471,7 +472,7 @@ export function registerHandlers(bot: Telegraf) {
 
     try {
       const summary = await getAccountSummary(user.walletAddress);
-      await ctx.replyWithMarkdown(summary, mainMenuKeyboard());
+      await ctx.replyWithMarkdown(summary, balanceKeyboard(MINIAPP_URL));
     } catch (error) {
       await ctx.reply('Error fetching balance. Please try again.');
     }
@@ -1032,7 +1033,7 @@ async function handleRefresh(ctx: Context) {
     const summary = await getAccountSummary(user.walletAddress);
     await ctx.editMessageText(summary, {
       parse_mode: 'Markdown',
-      ...mainMenuKeyboard(),
+      ...balanceKeyboard(MINIAPP_URL),
     });
   } catch (error) {
     await ctx.editMessageText('Error refreshing. Please try again.', mainMenuKeyboard());

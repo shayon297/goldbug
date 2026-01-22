@@ -196,6 +196,10 @@ async function main() {
   // Hourly (6h) position updates
   const POSITION_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
   let positionUpdateRunning = false;
+  const LIQUIDATION_ALERT_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+  const LIQUIDATION_THRESHOLD = 0.05; // 5% to liquidation price
+  const LIQUIDATION_ALERT_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours
+  const lastLiquidationAlert = new Map<string, number>();
 
   async function sendPositionUpdates() {
     if (positionUpdateRunning) return;
@@ -240,6 +244,63 @@ async function main() {
   }
 
   setInterval(sendPositionUpdates, POSITION_UPDATE_INTERVAL_MS);
+
+  async function sendLiquidationAlerts() {
+    try {
+      const hl = await getHyperliquidClient();
+      const users = await getAllUsers();
+
+      for (const user of users) {
+        try {
+          const position = await hl.getGoldPosition(user.walletAddress);
+          if (!position || parseFloat(position.position.szi) === 0) {
+            continue;
+          }
+
+          const liqPxRaw = position.position.liquidationPx;
+          if (!liqPxRaw) {
+            continue;
+          }
+
+          const liqPx = parseFloat(liqPxRaw);
+          const price = await hl.getGoldPrice();
+          const distance = Math.abs(price - liqPx) / liqPx;
+
+          if (distance > LIQUIDATION_THRESHOLD) {
+            continue;
+          }
+
+          const key = user.telegramId.toString();
+          const lastSent = lastLiquidationAlert.get(key) || 0;
+          if (Date.now() - lastSent < LIQUIDATION_ALERT_COOLDOWN_MS) {
+            continue;
+          }
+
+          lastLiquidationAlert.set(key, Date.now());
+
+          const side = parseFloat(position.position.szi) > 0 ? 'LONG' : 'SHORT';
+          const size = Math.abs(parseFloat(position.position.szi)).toFixed(4);
+          const leverage = position.position.leverage?.value ?? 0;
+
+          const message =
+            `⚠️ *Liquidation Alert (${TRADING_ASSET})*\n\n` +
+            `📈 *${side}* ${size} ${TRADING_ASSET}\n` +
+            `⚖️ Leverage: ${leverage}x\n` +
+            `💲 Price: $${price.toFixed(2)}\n` +
+            `🧨 Liq: $${liqPx.toFixed(2)}\n\n` +
+            `Top up collateral from /balance.`;
+
+          await bot.telegram.sendMessage(Number(user.telegramId), message, { parse_mode: 'Markdown' });
+        } catch (err) {
+          console.error('[Notifs] Liquidation alert failed for user', user.telegramId.toString(), err);
+        }
+      }
+    } catch (err) {
+      console.error('[Notifs] Liquidation alert job failed', err);
+    }
+  }
+
+  setInterval(sendLiquidationAlerts, LIQUIDATION_ALERT_INTERVAL_MS);
 
   // Graceful shutdown
   const shutdown = async () => {

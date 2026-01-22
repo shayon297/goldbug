@@ -85,6 +85,16 @@ export function confirmOrderKeyboard() {
   ]);
 }
 
+export function balanceKeyboard(miniAppUrl: string) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.webApp('🌉 Bridge USDC', `${miniAppUrl}?action=bridge`),
+      Markup.button.webApp('💳 Buy USDC', `${miniAppUrl}?action=onramp`),
+    ],
+    [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+
 // After order execution
 export function postOrderKeyboard() {
   return Markup.inlineKeyboard([
