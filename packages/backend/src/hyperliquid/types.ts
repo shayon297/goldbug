@@ -56,6 +56,16 @@ export interface OpenOrder {
   cloid?: string;
 }
 
+export interface UserFill {
+  coin: string;
+  px: string;
+  sz: string;
+  side: string;
+  time: number;
+  oid: number;
+  fee: string;
+}
+
 export interface OrderResult {
   status: 'ok' | 'err';
   response?: {

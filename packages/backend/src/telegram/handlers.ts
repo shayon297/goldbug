@@ -404,6 +404,38 @@ export function registerHandlers(bot: Telegraf) {
     }
   });
 
+  // /fills command
+  bot.command('fills', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    try {
+      const hl = await getHyperliquidClient();
+      const fills = await hl.getUserFills(user.walletAddress);
+      const recent = fills.slice(0, 5);
+
+      if (recent.length === 0) {
+        await ctx.reply(`No recent ${TRADING_ASSET} fills.`);
+        return;
+      }
+
+      const lines = recent.map((fill) => {
+        const time = new Date(fill.time).toLocaleString();
+        return `• ${fill.side} ${fill.sz} @ $${fill.px} (oid ${fill.oid})\n  ${time}`;
+      });
+
+      await ctx.replyWithMarkdown(`*Recent Fills (${TRADING_ASSET})*\n\n${lines.join('\n')}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      await ctx.reply(`❌ Error: ${message}`);
+    }
+  });
+
   // /balance command
   bot.command('balance', async (ctx) => {
     const telegramId = BigInt(ctx.from.id);

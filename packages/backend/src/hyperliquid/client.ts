@@ -3,6 +3,7 @@ import type {
   MetaResponse,
   UserState,
   OpenOrder,
+  UserFill,
   OrderResult,
   PlaceOrderParams,
   AssetPosition,
@@ -222,6 +223,18 @@ export class HyperliquidClient {
     }
     const orders = await this.infoRequest<OpenOrder[]>(payload);
     return orders.filter((o) => o.coin === ASSET_CONFIG.fullName);
+  }
+
+  /**
+   * Get recent fills for the configured trading asset
+   */
+  async getUserFills(walletAddress: string): Promise<UserFill[]> {
+    const fills = await this.infoRequest<UserFill[]>({
+      type: 'userFills',
+      user: walletAddress.toLowerCase(),
+      aggregateByTime: true,
+    });
+    return fills.filter((fill) => fill.coin === ASSET_CONFIG.fullName);
   }
 
   /**

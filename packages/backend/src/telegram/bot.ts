@@ -11,6 +11,7 @@ const BOT_COMMANDS = [
   { command: 'short', description: `Open a SHORT position on ${TRADING_ASSET}` },
   { command: 'position', description: 'View your current position' },
   { command: 'orders', description: 'View open orders' },
+  { command: 'fills', description: 'View recent fills' },
   { command: 'balance', description: 'Check account balance' },
   { command: 'bridge', description: '🌉 Bridge USDC to Hyperliquid' },
   { command: 'deposit', description: 'How to fund your wallet' },
