@@ -307,13 +307,25 @@ export default function Home() {
       const hlResult = await hlResponse.json();
       console.log('[Hyperliquid] approveAgent result:', JSON.stringify(hlResult));
 
-      // Explicitly verify the approval succeeded
-      if (hlResult.status !== 'ok') {
-        const errorMsg = hlResult.response || hlResult.error || JSON.stringify(hlResult);
-        throw new Error(`Agent approval failed: ${errorMsg}`);
-      }
+      // Check if approval succeeded or if user needs to deposit first
+      let agentApproved = false;
+      let needsDeposit = false;
       
-      console.log('[Hyperliquid] Agent approved successfully:', agentAddress);
+      if (hlResult.status === 'ok') {
+        agentApproved = true;
+        console.log('[Hyperliquid] Agent approved successfully:', agentAddress);
+      } else {
+        const errorMsg = hlResult.response || hlResult.error || JSON.stringify(hlResult);
+        
+        // Check if this is the "must deposit first" error - allow registration anyway
+        if (errorMsg.includes('Must deposit before performing actions')) {
+          console.log('[Hyperliquid] User needs to deposit first - proceeding with registration');
+          needsDeposit = true;
+          // Don't throw - we'll register the user and they can /reauth after depositing
+        } else {
+          throw new Error(`Agent approval failed: ${errorMsg}`);
+        }
+      }
 
       // Get Privy access token
       const accessToken = await getAccessToken();
@@ -336,6 +348,7 @@ export default function Home() {
           telegramUserId: telegramUser.id.toString(),
           agentAddress,
           agentPrivateKey,
+          agentApproved, // Tell backend if agent is approved on Hyperliquid
         }),
       });
 
@@ -346,6 +359,12 @@ export default function Home() {
 
       const data = await response.json();
       setRegisteredWallet(data.walletAddress || embeddedWallet.address);
+      
+      // If user needs to deposit first, show a different message
+      if (needsDeposit) {
+        setError('Wallet connected! You need to deposit funds first, then use /reauth to enable trading.');
+      }
+      
       setStep('success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -597,6 +616,16 @@ export default function Home() {
                 <p className="text-xs text-zinc-500 mb-1">Your Trading Wallet</p>
                 <p className="text-sm font-mono text-zinc-300 break-all">
                   {registeredWallet}
+                </p>
+              </div>
+            )}
+
+            {/* Show warning if user needs to deposit first */}
+            {error && (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-4 text-left">
+                <p className="text-amber-400 text-sm font-semibold mb-1">⚠️ Action Required</p>
+                <p className="text-amber-300 text-xs">
+                  Your wallet is connected, but you need to deposit funds before trading. After depositing, use <strong>/reauth</strong> in Telegram to enable trading.
                 </p>
               </div>
             )}
