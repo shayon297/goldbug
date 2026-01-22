@@ -31,23 +31,30 @@ export function mainMenuKeyboard() {
 
 // Unified dashboard keyboard - shows trading + position actions
 export function dashboardKeyboard(hasPosition: boolean, miniAppUrl: string) {
-  const buttons = [
+  if (hasPosition) {
+    return Markup.inlineKeyboard([
+      [
+        Markup.button.callback('📈 Long', 'action:long'),
+        Markup.button.callback('📉 Short', 'action:short'),
+      ],
+      [Markup.button.callback('🔴 Close Position', 'action:close')],
+      [
+        Markup.button.callback('📊 Details', 'action:details'),
+        Markup.button.webApp('💳 Add Funds', `${miniAppUrl}?action=onramp`),
+      ],
+    ]);
+  }
+
+  return Markup.inlineKeyboard([
     [
       Markup.button.callback('📈 Long', 'action:long'),
       Markup.button.callback('📉 Short', 'action:short'),
     ],
-  ];
-
-  if (hasPosition) {
-    buttons.push([Markup.button.callback('🔴 Close Position', 'action:close')]);
-  }
-
-  buttons.push([
-    Markup.button.callback('📊 Details', 'action:details'),
-    Markup.button.webApp('💳 Add Funds', `${miniAppUrl}?action=onramp`),
+    [
+      Markup.button.callback('📊 Details', 'action:details'),
+      Markup.button.webApp('💳 Add Funds', `${miniAppUrl}?action=onramp`),
+    ],
   ]);
-
-  return Markup.inlineKeyboard(buttons);
 }
 
 // Size selection
