@@ -341,8 +341,14 @@ export default function Home() {
         }
       }
 
-      // Approve builder fee if builder address is configured and user has funds
-      if (agentApproved && BUILDER_ADDRESS && BUILDER_ADDRESS !== '0x...your_builder_wallet_address') {
+      // Approve builder fee if builder address is configured (always try, even if agent approval had issues)
+      // This ensures users who already have an approved agent can still get builder fee approved
+      const shouldApproveBuilderFee = BUILDER_ADDRESS && 
+        BUILDER_ADDRESS !== '0x...your_builder_wallet_address' &&
+        BUILDER_ADDRESS !== 'DISABLED' &&
+        !needsDeposit; // Only skip if user has no funds
+        
+      if (shouldApproveBuilderFee) {
         try {
           console.log('[MiniApp] Approving builder fee for:', BUILDER_ADDRESS);
           
@@ -415,13 +421,18 @@ export default function Home() {
           if (builderHlResult.status === 'ok') {
             console.log('[Hyperliquid] Builder fee approved successfully');
           } else {
-            // Non-fatal - trading will still work, just without builder fee
-            console.warn('[Hyperliquid] Builder fee approval failed:', builderHlResult.response || builderHlResult);
+            // Log the error but don't block - user can retry later
+            console.error('[Hyperliquid] Builder fee approval failed:', builderHlResult.response || builderHlResult);
+            // Show a warning to the user
+            setError(`Builder fee approval may have failed: ${builderHlResult.response || 'Unknown error'}. Trading may still work.`);
           }
         } catch (builderError) {
-          // Non-fatal - log and continue
-          console.warn('[MiniApp] Builder fee approval error:', builderError);
+          // Log error but continue
+          console.error('[MiniApp] Builder fee approval error:', builderError);
+          setError(`Builder fee approval error: ${builderError instanceof Error ? builderError.message : 'Unknown error'}. Trading may still work.`);
         }
+      } else if (needsDeposit) {
+        console.log('[MiniApp] Skipping builder fee approval - user needs to deposit first');
       }
 
       // Get Privy access token
