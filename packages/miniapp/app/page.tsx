@@ -354,7 +354,12 @@ export default function Home() {
           
           const builderNonce = Date.now();
           
+          // Use same signatureChainId as agent approval (which works)
+          const builderSignatureChainId = signatureChainId; // 0xa4b1 = 42161
+          const builderChainIdNumeric = 42161;
+          
           // EIP-712 message for ApproveBuilderFee
+          // Only include fields that are in the types (signatureChainId is NOT in types)
           const builderEip712Message = {
             hyperliquidChain: 'Mainnet',
             maxFeeRate: BUILDER_MAX_FEE_RATE,
@@ -363,11 +368,12 @@ export default function Home() {
           };
           
           // EIP-712 typed data for ApproveBuilderFee
+          // Matching Python SDK's user_signed_payload structure exactly
           const builderTypedData = {
             domain: {
               name: 'HyperliquidSignTransaction',
               version: '1',
-              chainId: 42161, // Arbitrum One mainnet
+              chainId: builderChainIdNumeric,
               verifyingContract: '0x0000000000000000000000000000000000000000',
             },
             types: {
@@ -376,6 +382,12 @@ export default function Home() {
                 { name: 'maxFeeRate', type: 'string' },
                 { name: 'builder', type: 'address' },
                 { name: 'nonce', type: 'uint64' },
+              ],
+              'EIP712Domain': [
+                { name: 'name', type: 'string' },
+                { name: 'version', type: 'string' },
+                { name: 'chainId', type: 'uint256' },
+                { name: 'verifyingContract', type: 'address' },
               ],
             },
             primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
@@ -395,7 +407,7 @@ export default function Home() {
           const builderApiAction = {
             type: 'approveBuilderFee',
             hyperliquidChain: 'Mainnet',
-            signatureChainId: signatureChainId,
+            signatureChainId: builderSignatureChainId,
             maxFeeRate: BUILDER_MAX_FEE_RATE,
             builder: BUILDER_ADDRESS.toLowerCase(),
             nonce: builderNonce,
