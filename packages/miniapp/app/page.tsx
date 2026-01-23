@@ -42,6 +42,9 @@ export default function Home() {
 
   const [step, setStep] = useState<Step>('init');
   const [error, setError] = useState<string | null>(null);
+  const [depositWarning, setDepositWarning] = useState<string | null>(null);
+  const [builderFeeStatus, setBuilderFeeStatus] = useState<'pending' | 'approved' | 'failed' | null>(null);
+  const [builderFeeError, setBuilderFeeError] = useState<string | null>(null);
   const [telegramUser, setTelegramUser] = useState<{ id: number; firstName: string } | null>(null);
   const [registeredWallet, setRegisteredWallet] = useState<string | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<string>('0');
@@ -163,6 +166,44 @@ export default function Home() {
     });
   }, [ready, authenticated, wallets, wantsFunding, fundingAddress, fundWallet]);
 
+  // After success, fetch builder fee approval status for confirmation
+  useEffect(() => {
+    if (step !== 'success' || !registeredWallet || !API_URL) return;
+    if (!BUILDER_ADDRESS || BUILDER_ADDRESS === '0x...your_builder_wallet_address' || BUILDER_ADDRESS === 'DISABLED') return;
+
+    let cancelled = false;
+    setBuilderFeeStatus('pending');
+    setBuilderFeeError(null);
+
+    const checkBuilderFeeStatus = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/builder-fee-status?wallet=${registeredWallet}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (cancelled) return;
+
+        if (data?.approved) {
+          setBuilderFeeStatus('approved');
+        } else {
+          setBuilderFeeStatus('failed');
+          if (data?.maxFeeRate !== undefined) {
+            setBuilderFeeError(`Not approved yet (current: ${data.maxFeeRate})`);
+          }
+        }
+      } catch (fetchError) {
+        if (!cancelled) {
+          setBuilderFeeStatus('failed');
+          setBuilderFeeError('Unable to verify builder fee status.');
+        }
+      }
+    };
+
+    void checkBuilderFeeStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, registeredWallet]);
+
   // Handle login
   const handleLogin = useCallback(async () => {
     try {
@@ -233,6 +274,9 @@ export default function Home() {
 
     setStep('registering');
     setError(null);
+    setDepositWarning(null);
+    setBuilderFeeStatus(null);
+    setBuilderFeeError(null);
 
     try {
       // Get the embedded wallet
@@ -343,105 +387,119 @@ export default function Home() {
 
       // Approve builder fee if builder address is configured (always try, even if agent approval had issues)
       // This ensures users who already have an approved agent can still get builder fee approved
-      const shouldApproveBuilderFee = BUILDER_ADDRESS && 
+      const shouldApproveBuilderFee = BUILDER_ADDRESS &&
         BUILDER_ADDRESS !== '0x...your_builder_wallet_address' &&
         BUILDER_ADDRESS !== 'DISABLED' &&
         !needsDeposit; // Only skip if user has no funds
-        
+
+      const attemptApproveBuilderFee = async (builderSignatureChainId: string) => {
+        const builderNonce = Date.now();
+        const builderChainIdNumeric = parseInt(builderSignatureChainId, 16);
+
+        // EIP-712 message for ApproveBuilderFee (matches Python SDK behavior)
+        const builderEip712Message = {
+          hyperliquidChain: 'Mainnet',
+          signatureChainId: builderSignatureChainId,
+          maxFeeRate: BUILDER_MAX_FEE_RATE,
+          builder: BUILDER_ADDRESS.toLowerCase(),
+          nonce: builderNonce,
+        };
+
+        const builderTypedData = {
+          domain: {
+            name: 'HyperliquidSignTransaction',
+            version: '1',
+            chainId: builderChainIdNumeric,
+            verifyingContract: '0x0000000000000000000000000000000000000000',
+          },
+          types: {
+            'HyperliquidTransaction:ApproveBuilderFee': [
+              { name: 'hyperliquidChain', type: 'string' },
+              { name: 'maxFeeRate', type: 'string' },
+              { name: 'builder', type: 'address' },
+              { name: 'nonce', type: 'uint64' },
+            ],
+            'EIP712Domain': [
+              { name: 'name', type: 'string' },
+              { name: 'version', type: 'string' },
+              { name: 'chainId', type: 'uint256' },
+              { name: 'verifyingContract', type: 'address' },
+            ],
+          },
+          primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
+          message: builderEip712Message,
+        };
+
+        console.log('[MiniApp] Signing builder fee approval:', JSON.stringify(builderTypedData, null, 2));
+
+        const builderSignature = await provider.request({
+          method: 'eth_signTypedData_v4',
+          params: [embeddedWallet.address, JSON.stringify(builderTypedData)],
+        });
+
+        const builderSig = ethers.Signature.from(builderSignature as string);
+
+        const builderApiAction = {
+          type: 'approveBuilderFee',
+          hyperliquidChain: 'Mainnet',
+          signatureChainId: builderSignatureChainId,
+          maxFeeRate: BUILDER_MAX_FEE_RATE,
+          builder: BUILDER_ADDRESS.toLowerCase(),
+          nonce: builderNonce,
+        };
+
+        const builderRequestBody = {
+          action: builderApiAction,
+          nonce: builderNonce,
+          signature: { r: builderSig.r, s: builderSig.s, v: builderSig.v },
+        };
+
+        console.log('[MiniApp] Sending builder fee approval to Hyperliquid:', JSON.stringify(builderRequestBody, null, 2));
+
+        const builderHlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(builderRequestBody),
+        });
+
+        const builderHlResult = await builderHlResponse.json();
+        console.log('[Hyperliquid] approveBuilderFee result:', JSON.stringify(builderHlResult));
+
+        if (builderHlResult.status === 'ok') {
+          return { ok: true as const };
+        }
+
+        const errorMsg = builderHlResult.response || builderHlResult.error || JSON.stringify(builderHlResult);
+        return { ok: false as const, errorMsg };
+      };
+
       if (shouldApproveBuilderFee) {
-        try {
-          console.log('[MiniApp] Approving builder fee for:', BUILDER_ADDRESS);
-          
-          const builderNonce = Date.now();
-          
-          // Use same signatureChainId as agent approval (which works)
-          const builderSignatureChainId = signatureChainId; // 0xa4b1 = 42161
-          const builderChainIdNumeric = 42161;
-          
-          // EIP-712 message for ApproveBuilderFee
-          // Only include fields that are in the types (signatureChainId is NOT in types)
-          const builderEip712Message = {
-            hyperliquidChain: 'Mainnet',
-            maxFeeRate: BUILDER_MAX_FEE_RATE,
-            builder: BUILDER_ADDRESS.toLowerCase(),
-            nonce: builderNonce,
-          };
-          
-          // EIP-712 typed data for ApproveBuilderFee
-          // Matching Python SDK's user_signed_payload structure exactly
-          const builderTypedData = {
-            domain: {
-              name: 'HyperliquidSignTransaction',
-              version: '1',
-              chainId: builderChainIdNumeric,
-              verifyingContract: '0x0000000000000000000000000000000000000000',
-            },
-            types: {
-              'HyperliquidTransaction:ApproveBuilderFee': [
-                { name: 'hyperliquidChain', type: 'string' },
-                { name: 'maxFeeRate', type: 'string' },
-                { name: 'builder', type: 'address' },
-                { name: 'nonce', type: 'uint64' },
-              ],
-              'EIP712Domain': [
-                { name: 'name', type: 'string' },
-                { name: 'version', type: 'string' },
-                { name: 'chainId', type: 'uint256' },
-                { name: 'verifyingContract', type: 'address' },
-              ],
-            },
-            primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
-            message: builderEip712Message,
-          };
-          
-          console.log('[MiniApp] Signing builder fee approval:', JSON.stringify(builderTypedData, null, 2));
-          
-          const builderSignature = await provider.request({
-            method: 'eth_signTypedData_v4',
-            params: [embeddedWallet.address, JSON.stringify(builderTypedData)],
-          });
+        setBuilderFeeStatus('pending');
+        let lastError: string | null = null;
 
-          const builderSig = ethers.Signature.from(builderSignature as string);
-          
-          // Send approveBuilderFee to Hyperliquid
-          const builderApiAction = {
-            type: 'approveBuilderFee',
-            hyperliquidChain: 'Mainnet',
-            signatureChainId: builderSignatureChainId,
-            maxFeeRate: BUILDER_MAX_FEE_RATE,
-            builder: BUILDER_ADDRESS.toLowerCase(),
-            nonce: builderNonce,
-          };
-          
-          const builderRequestBody = {
-            action: builderApiAction,
-            nonce: builderNonce,
-            signature: { r: builderSig.r, s: builderSig.s, v: builderSig.v },
-          };
-          
-          console.log('[MiniApp] Sending builder fee approval to Hyperliquid:', JSON.stringify(builderRequestBody, null, 2));
-          
-          const builderHlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(builderRequestBody),
-          });
-
-          const builderHlResult = await builderHlResponse.json();
-          console.log('[Hyperliquid] approveBuilderFee result:', JSON.stringify(builderHlResult));
-          
-          if (builderHlResult.status === 'ok') {
-            console.log('[Hyperliquid] Builder fee approved successfully');
-          } else {
-            // Log the error but don't block - user can retry later
-            console.error('[Hyperliquid] Builder fee approval failed:', builderHlResult.response || builderHlResult);
-            // Show a warning to the user
-            setError(`Builder fee approval may have failed: ${builderHlResult.response || 'Unknown error'}. Trading may still work.`);
+        // Try Python SDK signing chain first, then fallback to 0xa4b1
+        for (const chainId of ['0x66eee', '0xa4b1']) {
+          try {
+            const result = await attemptApproveBuilderFee(chainId);
+            if (result.ok) {
+              console.log('[Hyperliquid] Builder fee approved successfully');
+              setBuilderFeeStatus('approved');
+              lastError = null;
+              break;
+            } else {
+              console.warn('[Hyperliquid] Builder fee approval failed:', result.errorMsg);
+              lastError = result.errorMsg;
+            }
+          } catch (builderError) {
+            const message = builderError instanceof Error ? builderError.message : String(builderError);
+            console.warn('[MiniApp] Builder fee approval error:', message);
+            lastError = message;
           }
-        } catch (builderError) {
-          // Log error but continue
-          console.error('[MiniApp] Builder fee approval error:', builderError);
-          setError(`Builder fee approval error: ${builderError instanceof Error ? builderError.message : 'Unknown error'}. Trading may still work.`);
+        }
+
+        if (lastError) {
+          setBuilderFeeStatus('failed');
+          setBuilderFeeError(lastError);
         }
       } else if (needsDeposit) {
         console.log('[MiniApp] Skipping builder fee approval - user needs to deposit first');
@@ -482,7 +540,7 @@ export default function Home() {
       
       // If user needs to deposit first, show a different message
       if (needsDeposit) {
-        setError('Wallet connected! You need to deposit funds first, then use /reauth to enable trading.');
+        setDepositWarning('Wallet connected! You need to deposit funds first, then use /reauth to enable trading.');
       } else if (agentApproved) {
         // Notify backend that auth is complete - this will auto-execute any pending order
         try {
@@ -836,12 +894,41 @@ export default function Home() {
             )}
 
             {/* Show warning if user needs to deposit first */}
-            {error && (
+            {depositWarning && (
               <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-4 text-left">
                 <p className="text-amber-400 text-sm font-semibold mb-1">⚠️ Action Required</p>
                 <p className="text-amber-300 text-xs">
                   Your wallet is connected, but you need to deposit funds before trading. After depositing, use <strong>/reauth</strong> in Telegram to enable trading.
                 </p>
+              </div>
+            )}
+
+            {/* Builder fee approval status */}
+            {builderFeeStatus && (
+              <div className={`rounded-lg p-3 mb-4 text-left border ${
+                builderFeeStatus === 'approved'
+                  ? 'bg-green-500/10 border-green-500/30'
+                  : builderFeeStatus === 'failed'
+                    ? 'bg-red-500/10 border-red-500/30'
+                    : 'bg-zinc-800/50 border-zinc-700/50'
+              }`}>
+                <p className={`text-sm font-semibold mb-1 ${
+                  builderFeeStatus === 'approved' ? 'text-green-400' : builderFeeStatus === 'failed' ? 'text-red-400' : 'text-zinc-300'
+                }`}>
+                  {builderFeeStatus === 'approved'
+                    ? '✅ Builder fee approved'
+                    : builderFeeStatus === 'failed'
+                      ? '❌ Builder fee not approved'
+                      : '⏳ Checking builder fee approval'}
+                </p>
+                {builderFeeStatus === 'failed' && builderFeeError && (
+                  <p className="text-xs text-red-300">
+                    {builderFeeError}. Please run <strong>/reauth</strong> again.
+                  </p>
+                )}
+                {builderFeeStatus === 'pending' && (
+                  <p className="text-xs text-zinc-400">Verifying approval status...</p>
+                )}
               </div>
             )}
 

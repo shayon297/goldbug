@@ -18,6 +18,7 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || 'webhook-secret';
 const MINIAPP_URL = process.env.MINIAPP_URL || '';
+const BUILDER_ADDRESS = process.env.BUILDER_ADDRESS || '';
 
 // Gas drip configuration
 const GAS_FUNDER_PRIVATE_KEY = process.env.GAS_FUNDER_PRIVATE_KEY || '';
@@ -93,6 +94,31 @@ async function main() {
       res.json({ coin: 'GOLD', price, timestamp: Date.now() });
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch price' });
+    }
+  });
+
+  // Builder fee approval status (public)
+  app.get('/api/builder-fee-status', async (req, res) => {
+    try {
+      const wallet = req.query.wallet as string | undefined;
+      if (!wallet || !ethers.isAddress(wallet)) {
+        res.status(400).json({ error: 'Invalid wallet address' });
+        return;
+      }
+
+      if (!BUILDER_ADDRESS) {
+        res.status(503).json({ error: 'Builder fee not configured' });
+        return;
+      }
+
+      const hl = await getHyperliquidClient();
+      const maxFeeRate = await hl.getMaxBuilderFee(wallet, BUILDER_ADDRESS);
+      const numeric = parseFloat(maxFeeRate.replace('%', ''));
+      const approved = !Number.isNaN(numeric) && numeric > 0;
+
+      res.json({ approved, maxFeeRate });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to fetch builder fee status' });
     }
   });
 

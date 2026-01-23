@@ -29,6 +29,7 @@ import {
 import { getHyperliquidClient, TRADING_ASSET } from '../hyperliquid/client.js';
 
 const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
+const BUILDER_ADDRESS = process.env.BUILDER_ADDRESS || '';
 
 /**
  * Check if user has existing position with different leverage (for warning)
@@ -134,6 +135,11 @@ async function getAccountSummary(walletAddress: string): Promise<string> {
  */
 function formatWalletAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function isBuilderFeeApproved(maxFeeRate: string): boolean {
+  const numeric = parseFloat(maxFeeRate.replace('%', ''));
+  return !Number.isNaN(numeric) && numeric > 0;
 }
 
 /**
@@ -849,6 +855,32 @@ export function registerHandlers(bot: Telegraf) {
 
     try {
       const hl = await getHyperliquidClient();
+
+      if (BUILDER_ADDRESS) {
+        const maxFeeRate = await hl.getMaxBuilderFee(user.walletAddress, BUILDER_ADDRESS);
+        if (!isBuilderFeeApproved(maxFeeRate)) {
+          await updateSession(telegramId, {
+            ...session,
+            step: 'idle',
+            pendingOrder: {
+              side: session.side!,
+              sizeUsd: session.sizeUsd!,
+              leverage: session.leverage!,
+              orderType: session.orderType!,
+              limitPrice: session.limitPrice,
+            },
+          });
+
+          await ctx.editMessageText(
+            `🔒 *Builder Fee Approval Required*\n\n` +
+              `Your account has not approved the builder fee yet.\n` +
+              `Tap below to approve it, then your order will execute automatically.\n\n` +
+              `_This is required to route trades through the bot._`,
+            { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
+          );
+          return;
+        }
+      }
 
       const result = await hl.placeOrder(user.agentPrivateKey, user.walletAddress, {
         side: session.side,

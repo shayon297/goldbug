@@ -171,6 +171,19 @@ export class HyperliquidClient {
   }
 
   /**
+   * Get approved maximum builder fee rate for a user + builder
+   */
+  async getMaxBuilderFee(userAddress: string, builderAddress: string): Promise<string> {
+    const response = await this.infoRequest<string | number>({
+      type: 'maxBuilderFee',
+      user: userAddress,
+      builder: builderAddress.toLowerCase(),
+    });
+
+    return typeof response === 'number' ? response.toString() : response;
+  }
+
+  /**
    * Get current price for the configured trading asset
    */
   async getGoldPrice(): Promise<number> {
