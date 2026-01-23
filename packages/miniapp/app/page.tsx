@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { usePrivy, useWallets, useFundWallet, useSendTransaction } from '@privy-io/react-auth';
+import { usePrivy, useWallets, useFundWallet } from '@privy-io/react-auth';
 import { Wallet, ethers, Contract, formatUnits, parseUnits } from 'ethers';
 import { arbitrum } from 'viem/chains';
 import {
@@ -38,7 +38,6 @@ export default function Home() {
   const { ready, authenticated, login, getAccessToken } = privy;
   const { wallets } = useWallets();
   const { fundWallet } = useFundWallet();
-  const { sendTransaction } = useSendTransaction();
 
   const [step, setStep] = useState<Step>('init');
   const [error, setError] = useState<string | null>(null);
@@ -520,7 +519,7 @@ export default function Home() {
     setStep('bridge');
   }, [fetchBalances]);
 
-  // Handle bridge execution with gas sponsorship
+  // Handle bridge execution with automatic gas drip
   const handleBridge = useCallback(async () => {
     if (!bridgeAmount || wallets.length === 0) return;
     
@@ -540,66 +539,85 @@ export default function Home() {
     setError(null);
 
     try {
-      const amountWei = parseUnits(bridgeAmount, 6);
-      const amountHex = '0x' + amountWei.toString(16);
-
-      // ERC20 function selectors
-      const approveSelector = '0x095ea7b3'; // approve(address,uint256)
-      const transferSelector = '0xa9059cbb'; // transfer(address,uint256)
-
-      // Encode approve calldata: approve(HYPERLIQUID_BRIDGE, amountWei)
-      const paddedBridge = HYPERLIQUID_BRIDGE.slice(2).toLowerCase().padStart(64, '0');
-      const paddedAmount = amountWei.toString(16).padStart(64, '0');
-      const approveData = `${approveSelector}${paddedBridge}${paddedAmount}`;
-
-      // Encode transfer calldata: transfer(HYPERLIQUID_BRIDGE, amountWei)
-      const transferData = `${transferSelector}${paddedBridge}${paddedAmount}`;
-
-      // Check current allowance using read-only provider
-      const readProvider = new ethers.JsonRpcProvider(ARBITRUM_RPC);
-      const usdcRead = new Contract(USDC_ADDRESS, ERC20_ABI, readProvider);
-      const currentAllowance = await usdcRead.allowance(embeddedWallet.address, HYPERLIQUID_BRIDGE);
-
-      // Step 1: Approve if needed (gas sponsored)
-      if (currentAllowance < amountWei) {
-        console.log('[Bridge] Approving USDC with gas sponsorship...');
-        await sendTransaction(
-          {
-            to: USDC_ADDRESS as `0x${string}`,
-            data: approveData as `0x${string}`,
-            chainId: arbitrum.id,
-          },
-          {
-            sponsor: true, // Enable gas sponsorship
-            address: embeddedWallet.address,
-            uiOptions: {
-              showWalletUIs: false, // Don't show confirmation modal
-            },
-          }
-        );
-        console.log('[Bridge] Approval complete');
+      // Get the Ethereum provider from Privy wallet
+      const provider = await embeddedWallet.getEthereumProvider();
+      const ethersProvider = new ethers.BrowserProvider(provider);
+      
+      // Check if user has enough ETH for gas
+      const ethBalance = await ethersProvider.getBalance(embeddedWallet.address);
+      const minGasBalance = ethers.parseEther('0.00002');
+      
+      if (ethBalance < minGasBalance) {
+        console.log('[Bridge] User needs gas, requesting drip...');
         
-        // Wait a moment for the approval to be indexed
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Request gas drip from backend
+        try {
+          const dripResponse = await fetch(`${API_URL}/api/gas-drip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ walletAddress: embeddedWallet.address }),
+          });
+          
+          const dripResult = await dripResponse.json();
+          
+          if (!dripResponse.ok) {
+            throw new Error(dripResult.error || 'Gas drip failed');
+          }
+          
+          if (dripResult.success && !dripResult.skipped) {
+            console.log('[Bridge] Gas drip received:', dripResult.txHash);
+            // Wait for the gas drip transaction to be indexed
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+        } catch (dripError) {
+          console.error('[Bridge] Gas drip failed:', dripError);
+          // Continue anyway - maybe user has just enough gas
+        }
       }
 
-      // Step 2: Transfer USDC to bridge (gas sponsored)
-      console.log('[Bridge] Transferring USDC to Hyperliquid bridge with gas sponsorship...');
-      const { hash } = await sendTransaction(
-        {
-          to: USDC_ADDRESS as `0x${string}`,
-          data: transferData as `0x${string}`,
-          chainId: arbitrum.id,
-        },
-        {
-          sponsor: true, // Enable gas sponsorship
-          address: embeddedWallet.address,
-          uiOptions: {
-            showWalletUIs: false,
-          },
+      const signer = await ethersProvider.getSigner();
+
+      // Switch to Arbitrum if needed
+      try {
+        await provider.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0xa4b1' }], // Arbitrum One
+        });
+      } catch (switchError: any) {
+        // Chain not added, try to add it
+        if (switchError.code === 4902) {
+          await provider.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: '0xa4b1',
+              chainName: 'Arbitrum One',
+              nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+              rpcUrls: ['https://arb1.arbitrum.io/rpc'],
+              blockExplorerUrls: ['https://arbiscan.io'],
+            }],
+          });
         }
-      );
-      console.log('[Bridge] Transfer complete, hash:', hash);
+      }
+
+      const usdc = new Contract(USDC_ADDRESS, ERC20_ABI, signer);
+      const amountWei = parseUnits(bridgeAmount, 6);
+
+      // Check allowance
+      const allowance = await usdc.allowance(embeddedWallet.address, HYPERLIQUID_BRIDGE);
+      
+      if (allowance < amountWei) {
+        // Approve USDC spending
+        console.log('[Bridge] Approving USDC...');
+        const approveTx = await usdc.approve(HYPERLIQUID_BRIDGE, amountWei);
+        await approveTx.wait();
+        console.log('[Bridge] Approval complete');
+      }
+
+      // Transfer USDC to bridge
+      console.log('[Bridge] Transferring USDC to Hyperliquid...');
+      const transferTx = await usdc.transfer(HYPERLIQUID_BRIDGE, amountWei);
+      await transferTx.wait();
+      console.log('[Bridge] Transfer complete');
 
       setStep('bridged');
     } catch (err) {
@@ -608,7 +626,7 @@ export default function Home() {
       setError(message);
       setStep('bridge');
     }
-  }, [bridgeAmount, wallets, sendTransaction]);
+  }, [bridgeAmount, wallets]);
 
   // Render loading state
   if (!ready || step === 'init') {

@@ -19,6 +19,12 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || 'webhook-secret';
 const MINIAPP_URL = process.env.MINIAPP_URL || '';
 
+// Gas drip configuration
+const GAS_FUNDER_PRIVATE_KEY = process.env.GAS_FUNDER_PRIVATE_KEY || '';
+const ARBITRUM_RPC = process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc';
+const GAS_DRIP_AMOUNT = ethers.parseEther('0.00005'); // ~$0.15 at $3000/ETH - enough for ~2-3 txs
+const MIN_GAS_BALANCE = ethers.parseEther('0.00002'); // Minimum ETH to skip drip
+
 async function main() {
   console.log('[Server] Starting GOLD Trading Bot...');
 
@@ -158,6 +164,74 @@ async function main() {
       }
 
       res.status(500).json({ error: 'Registration failed' });
+    }
+  });
+
+  // Gas drip endpoint - sends small amount of ETH for gas
+  app.post('/api/gas-drip', registrationLimiter, async (req: Request, res: Response) => {
+    try {
+      const { walletAddress } = req.body;
+
+      if (!walletAddress || !ethers.isAddress(walletAddress)) {
+        res.status(400).json({ error: 'Invalid wallet address' });
+        return;
+      }
+
+      if (!GAS_FUNDER_PRIVATE_KEY) {
+        res.status(503).json({ error: 'Gas drip not configured' });
+        return;
+      }
+
+      // Check current balance
+      const provider = new ethers.JsonRpcProvider(ARBITRUM_RPC);
+      const currentBalance = await provider.getBalance(walletAddress);
+
+      if (currentBalance >= MIN_GAS_BALANCE) {
+        console.log(`[GasDrip] User ${walletAddress} already has ${ethers.formatEther(currentBalance)} ETH, skipping`);
+        res.json({ 
+          success: true, 
+          skipped: true, 
+          message: 'Sufficient gas balance',
+          balance: ethers.formatEther(currentBalance)
+        });
+        return;
+      }
+
+      // Create funder wallet
+      const funderWallet = new ethers.Wallet(GAS_FUNDER_PRIVATE_KEY, provider);
+      
+      // Check funder balance
+      const funderBalance = await provider.getBalance(funderWallet.address);
+      if (funderBalance < GAS_DRIP_AMOUNT) {
+        console.error(`[GasDrip] Funder wallet ${funderWallet.address} has insufficient balance: ${ethers.formatEther(funderBalance)}`);
+        res.status(503).json({ error: 'Gas funder depleted' });
+        return;
+      }
+
+      // Send gas drip
+      console.log(`[GasDrip] Sending ${ethers.formatEther(GAS_DRIP_AMOUNT)} ETH to ${walletAddress}`);
+      
+      const tx = await funderWallet.sendTransaction({
+        to: walletAddress,
+        value: GAS_DRIP_AMOUNT,
+      });
+
+      console.log(`[GasDrip] Transaction sent: ${tx.hash}`);
+      
+      // Wait for confirmation
+      const receipt = await tx.wait();
+      
+      console.log(`[GasDrip] Transaction confirmed in block ${receipt?.blockNumber}`);
+
+      res.json({
+        success: true,
+        txHash: tx.hash,
+        amount: ethers.formatEther(GAS_DRIP_AMOUNT),
+      });
+    } catch (error) {
+      console.error('[GasDrip] Error:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      res.status(500).json({ error: `Gas drip failed: ${message}` });
     }
   });
 
