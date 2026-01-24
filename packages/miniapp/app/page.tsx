@@ -415,6 +415,7 @@ export default function Home() {
           types: {
             'HyperliquidTransaction:ApproveBuilderFee': [
               { name: 'hyperliquidChain', type: 'string' },
+              { name: 'signatureChainId', type: 'string' },
               { name: 'maxFeeRate', type: 'string' },
               { name: 'builder', type: 'address' },
               { name: 'nonce', type: 'uint64' },
