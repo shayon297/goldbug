@@ -392,115 +392,93 @@ export default function Home() {
         BUILDER_ADDRESS !== 'DISABLED' &&
         !needsDeposit; // Only skip if user has no funds
 
-      const attemptApproveBuilderFee = async (builderSignatureChainId: string) => {
-        const builderNonce = Date.now();
-        const builderChainIdNumeric = parseInt(builderSignatureChainId, 16);
-
-        // EIP-712 message for ApproveBuilderFee (matches Python SDK behavior)
-        const builderEip712Message = {
-          hyperliquidChain: 'Mainnet',
-          signatureChainId: builderSignatureChainId,
-          maxFeeRate: BUILDER_MAX_FEE_RATE,
-          builder: BUILDER_ADDRESS.toLowerCase(),
-          nonce: builderNonce,
-        };
-
-        const builderTypedData = {
-          domain: {
-            name: 'HyperliquidSignTransaction',
-            version: '1',
-            chainId: builderChainIdNumeric,
-            verifyingContract: '0x0000000000000000000000000000000000000000',
-          },
-          types: {
-            'HyperliquidTransaction:ApproveBuilderFee': [
-              { name: 'hyperliquidChain', type: 'string' },
-              { name: 'signatureChainId', type: 'string' },
-              { name: 'maxFeeRate', type: 'string' },
-              { name: 'builder', type: 'address' },
-              { name: 'nonce', type: 'uint64' },
-            ],
-            'EIP712Domain': [
-              { name: 'name', type: 'string' },
-              { name: 'version', type: 'string' },
-              { name: 'chainId', type: 'uint256' },
-              { name: 'verifyingContract', type: 'address' },
-            ],
-          },
-          primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
-          message: builderEip712Message,
-        };
-
-        console.log('[MiniApp] Signing builder fee approval:', JSON.stringify(builderTypedData, null, 2));
-
-        const builderSignature = await provider.request({
-          method: 'eth_signTypedData_v4',
-          params: [embeddedWallet.address, JSON.stringify(builderTypedData)],
-        });
-
-        const builderSig = ethers.Signature.from(builderSignature as string);
-
-        const builderApiAction = {
-          type: 'approveBuilderFee',
-          hyperliquidChain: 'Mainnet',
-          signatureChainId: builderSignatureChainId,
-          maxFeeRate: BUILDER_MAX_FEE_RATE,
-          builder: BUILDER_ADDRESS.toLowerCase(),
-          nonce: builderNonce,
-        };
-
-        const builderRequestBody = {
-          action: builderApiAction,
-          nonce: builderNonce,
-          signature: { r: builderSig.r, s: builderSig.s, v: builderSig.v },
-        };
-
-        console.log('[MiniApp] Sending builder fee approval to Hyperliquid:', JSON.stringify(builderRequestBody, null, 2));
-
-        const builderHlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(builderRequestBody),
-        });
-
-        const builderHlResult = await builderHlResponse.json();
-        console.log('[Hyperliquid] approveBuilderFee result:', JSON.stringify(builderHlResult));
-
-        if (builderHlResult.status === 'ok') {
-          return { ok: true as const };
-        }
-
-        const errorMsg = builderHlResult.response || builderHlResult.error || JSON.stringify(builderHlResult);
-        return { ok: false as const, errorMsg };
-      };
-
       if (shouldApproveBuilderFee) {
         setBuilderFeeStatus('pending');
-        let lastError: string | null = null;
+        
+        try {
+          const builderNonce = Date.now();
+          
+          // EIP-712 message for ApproveBuilderFee
+          // MUST match Python SDK exactly: NO signatureChainId in message or types
+          const builderEip712Message = {
+            hyperliquidChain: 'Mainnet',
+            maxFeeRate: BUILDER_MAX_FEE_RATE,
+            builder: BUILDER_ADDRESS.toLowerCase(),
+            nonce: builderNonce,
+          };
 
-        // Try Python SDK signing chain first, then fallback to 0xa4b1
-        for (const chainId of ['0x66eee', '0xa4b1']) {
-          try {
-            const result = await attemptApproveBuilderFee(chainId);
-            if (result.ok) {
-              console.log('[Hyperliquid] Builder fee approved successfully');
-              setBuilderFeeStatus('approved');
-              lastError = null;
-              break;
-            } else {
-              console.warn('[Hyperliquid] Builder fee approval failed:', result.errorMsg);
-              lastError = result.errorMsg;
-            }
-          } catch (builderError) {
-            const message = builderError instanceof Error ? builderError.message : String(builderError);
-            console.warn('[MiniApp] Builder fee approval error:', message);
-            lastError = message;
+          // EIP-712 typed data - matches Python SDK sign_approve_builder_fee exactly
+          // chainId = 421614 (0x66eee) - hardcoded per SDK
+          // types do NOT include signatureChainId
+          const builderTypedData = {
+            domain: {
+              name: 'HyperliquidSignTransaction',
+              version: '1',
+              chainId: 421614, // 0x66eee - hardcoded per Python SDK
+              verifyingContract: '0x0000000000000000000000000000000000000000',
+            },
+            types: {
+              'HyperliquidTransaction:ApproveBuilderFee': [
+                { name: 'hyperliquidChain', type: 'string' },
+                { name: 'maxFeeRate', type: 'string' },
+                { name: 'builder', type: 'address' },
+                { name: 'nonce', type: 'uint64' },
+              ],
+            },
+            primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
+            message: builderEip712Message,
+          };
+
+          console.log('[MiniApp] Signing builder fee approval:', JSON.stringify(builderTypedData, null, 2));
+
+          const builderSignature = await provider.request({
+            method: 'eth_signTypedData_v4',
+            params: [embeddedWallet.address, JSON.stringify(builderTypedData)],
+          });
+
+          const builderSig = ethers.Signature.from(builderSignature as string);
+
+          // API action - includes signatureChainId (required by API)
+          const builderApiAction = {
+            type: 'approveBuilderFee',
+            hyperliquidChain: 'Mainnet',
+            signatureChainId: '0x66eee', // hardcoded per Python SDK
+            maxFeeRate: BUILDER_MAX_FEE_RATE,
+            builder: BUILDER_ADDRESS.toLowerCase(),
+            nonce: builderNonce,
+          };
+
+          const builderRequestBody = {
+            action: builderApiAction,
+            nonce: builderNonce,
+            signature: { r: builderSig.r, s: builderSig.s, v: builderSig.v },
+          };
+
+          console.log('[MiniApp] Sending builder fee approval to Hyperliquid:', JSON.stringify(builderRequestBody, null, 2));
+
+          const builderHlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(builderRequestBody),
+          });
+
+          const builderHlResult = await builderHlResponse.json();
+          console.log('[Hyperliquid] approveBuilderFee result:', JSON.stringify(builderHlResult));
+
+          if (builderHlResult.status === 'ok') {
+            console.log('[Hyperliquid] Builder fee approved successfully');
+            setBuilderFeeStatus('approved');
+          } else {
+            const errorMsg = builderHlResult.response || builderHlResult.error || JSON.stringify(builderHlResult);
+            console.error('[Hyperliquid] Builder fee approval failed:', errorMsg);
+            setBuilderFeeStatus('failed');
+            setBuilderFeeError(errorMsg);
           }
-        }
-
-        if (lastError) {
+        } catch (builderError) {
+          const message = builderError instanceof Error ? builderError.message : String(builderError);
+          console.error('[MiniApp] Builder fee approval error:', message);
           setBuilderFeeStatus('failed');
-          setBuilderFeeError(lastError);
+          setBuilderFeeError(message);
         }
       } else if (needsDeposit) {
         console.log('[MiniApp] Skipping builder fee approval - user needs to deposit first');
