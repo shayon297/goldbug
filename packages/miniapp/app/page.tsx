@@ -407,14 +407,14 @@ export default function Home() {
             nonce: builderNonce,
           };
 
-          // EIP-712 typed data - matches Python SDK sign_approve_builder_fee exactly
-          // chainId = 421614 (0x66eee) - hardcoded per SDK
+          // EIP-712 typed data for ApproveBuilderFee
+          // Use Arbitrum One chainId (42161) to match the signing chain
           // types do NOT include signatureChainId
           const builderTypedData = {
             domain: {
               name: 'HyperliquidSignTransaction',
               version: '1',
-              chainId: 421614, // 0x66eee - hardcoded per Python SDK
+              chainId: 42161, // 0xa4b1 - Arbitrum One
               verifyingContract: '0x0000000000000000000000000000000000000000',
             },
             types: {
@@ -442,7 +442,7 @@ export default function Home() {
           const builderApiAction = {
             type: 'approveBuilderFee',
             hyperliquidChain: 'Mainnet',
-            signatureChainId: '0x66eee', // hardcoded per Python SDK
+            signatureChainId: '0xa4b1', // Arbitrum One
             maxFeeRate: BUILDER_MAX_FEE_RATE,
             builder: BUILDER_ADDRESS.toLowerCase(),
             nonce: builderNonce,
