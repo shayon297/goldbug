@@ -440,6 +440,13 @@ export default function Home() {
         BUILDER_ADDRESS !== 'DISABLED' &&
         !needsDeposit; // Only skip if user has no funds
 
+      console.log('[MiniApp] Builder fee approval check:', {
+        BUILDER_ADDRESS,
+        needsDeposit,
+        wantsBuilderFeeOnly,
+        shouldApproveBuilderFee,
+      });
+
       if (shouldApproveBuilderFee) {
         setBuilderFeeStatus('pending');
         await logClientEvent('builder_fee', 'starting approval', {
@@ -521,9 +528,18 @@ export default function Home() {
             primaryAttempt.proxyResult?.response?.response ||
             primaryAttempt.proxyResult?.error ||
             'Builder fee approval failed';
+          
+          // More flexible regex to match various error formats
           const mismatchAddressMatch =
-            typeof errorMsg === 'string' ? errorMsg.match(/User:\s*(0x[a-fA-F0-9]{40})/) : null;
+            typeof errorMsg === 'string' 
+              ? errorMsg.match(/User[:\s]+(0x[a-fA-F0-9]{40})/i) || 
+                errorMsg.match(/(0x[a-fA-F0-9]{40})/i)
+              : null;
           const mismatchAddress = mismatchAddressMatch?.[1];
+          
+          console.log('[MiniApp] Error message:', errorMsg);
+          console.log('[MiniApp] Mismatch address match:', mismatchAddressMatch);
+          console.log('[MiniApp] Mismatch address:', mismatchAddress);
 
           if (
             !(primaryAttempt.proxyResponse.ok && primaryAttempt.proxyResult?.response?.status === 'ok') &&
@@ -550,7 +566,9 @@ export default function Home() {
             setBuilderFeeStatus('failed');
             setBuilderFeeError(finalErrorMsg);
             if (typeof finalErrorMsg === 'string' && finalErrorMsg.includes('Must deposit before performing actions')) {
-              const match = finalErrorMsg.match(/User:\s*(0x[a-fA-F0-9]{40})/);
+              // More flexible regex to match various error formats
+              const match = finalErrorMsg.match(/User[:\s]+(0x[a-fA-F0-9]{40})/i) || 
+                           finalErrorMsg.match(/(0x[a-fA-F0-9]{40})/i);
               const addressForDeposit = match?.[1] || embeddedWallet.address;
               setDepositWarning(
                 `Deposit USDC to ${addressForDeposit} on Hyperliquid, then run /approval to enable trading.`
