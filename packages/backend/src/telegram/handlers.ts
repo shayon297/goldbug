@@ -305,7 +305,7 @@ export function registerHandlers(bot: Telegraf) {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🔑 Re-authorize Agent', web_app: { url: `${MINIAPP_URL}?action=reauth&v=${cacheBuster}` } }],
+            [{ text: '🧪🔑 Re-authorize Agent (new)', web_app: { url: `${MINIAPP_URL}?action=reauth&v=${cacheBuster}` } }],
           ],
         },
       }
