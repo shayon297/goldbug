@@ -77,12 +77,13 @@ export default function Home() {
     const user = getTelegramUser();
     setTelegramUser(user);
 
-    // Check URL params for actions
+    // Check URL params or path for actions
     if (!checkedUrl.current) {
       checkedUrl.current = true;
       const params = new URLSearchParams(window.location.search);
       const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
-      const action = params.get('action') || hashParams.get('action');
+      const actionFromPath = window.location.pathname.includes('/approval') ? 'approval' : null;
+      const action = actionFromPath || params.get('action') || hashParams.get('action');
       
       if (action === 'bridge') {
         console.log('[MiniApp] Bridge action detected');

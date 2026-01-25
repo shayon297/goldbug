@@ -193,8 +193,9 @@ export function closeConfirmKeyboard() {
 // Authorize trading (for users who deposited but haven't authorized agent yet)
 export function authorizeKeyboard(miniAppUrl: string) {
   const cacheBuster = Date.now();
+  const approvalUrl = `${miniAppUrl.replace(/\/$/, '')}/approval?v=${cacheBuster}`;
   return Markup.inlineKeyboard([
-    [Markup.button.webApp('✅ Approve Trading', `${miniAppUrl}?action=approval&v=${cacheBuster}`)],
+    [Markup.button.webApp('✅ Approve Trading', approvalUrl)],
     [Markup.button.callback('🏠 Main Menu', 'action:menu')],
   ]);
 }

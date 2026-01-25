@@ -298,6 +298,7 @@ export function registerHandlers(bot: Telegraf) {
     }
 
     const cacheBuster = Date.now();
+    const approvalUrl = `${MINIAPP_URL.replace(/\/$/, '')}/approval?v=${cacheBuster}`;
     await ctx.replyWithMarkdown(
       `✅ *Approve Trading*\n\n` +
         `This step approves your trading agent and builder fee.\n\n` +
@@ -305,7 +306,7 @@ export function registerHandlers(bot: Telegraf) {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '✅ Approve Trading (new)', web_app: { url: `${MINIAPP_URL}?action=approval&v=${cacheBuster}` } }],
+            [{ text: '✅ Approve Trading (new)', web_app: { url: approvalUrl } }],
           ],
         },
       }
