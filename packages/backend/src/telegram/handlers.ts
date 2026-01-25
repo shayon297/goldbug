@@ -31,56 +31,6 @@ import { getHyperliquidClient, TRADING_ASSET } from '../hyperliquid/client.js';
 const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
 const BUILDER_ADDRESS = process.env.BUILDER_ADDRESS || '';
 const BUILDER_MAX_FEE_RATE = process.env.BUILDER_MAX_FEE_RATE || '0.1%';
-const HYPERLIQUID_API_URL = process.env.HYPERLIQUID_API_URL || 'https://api.hyperliquid.xyz';
-
-async function approveBuilderFeeWithAgent(agentPrivateKey: string): Promise<{ ok: boolean; response: unknown }> {
-  const wallet = new ethers.Wallet(agentPrivateKey);
-  const nonce = Date.now();
-
-  const domain = {
-    name: 'HyperliquidSignTransaction',
-    version: '1',
-    chainId: 421614, // 0x66eee
-    verifyingContract: '0x0000000000000000000000000000000000000000',
-  };
-
-  const types = {
-    'HyperliquidTransaction:ApproveBuilderFee': [
-      { name: 'hyperliquidChain', type: 'string' },
-      { name: 'maxFeeRate', type: 'string' },
-      { name: 'builder', type: 'address' },
-      { name: 'nonce', type: 'uint64' },
-    ],
-  };
-
-  const message = {
-    hyperliquidChain: 'Mainnet',
-    maxFeeRate: BUILDER_MAX_FEE_RATE,
-    builder: BUILDER_ADDRESS.toLowerCase(),
-    nonce,
-  };
-
-  const signature = await wallet.signTypedData(domain, types, message);
-  const sig = ethers.Signature.from(signature);
-
-  const action = {
-    type: 'approveBuilderFee',
-    hyperliquidChain: 'Mainnet',
-    signatureChainId: '0x66eee',
-    maxFeeRate: BUILDER_MAX_FEE_RATE,
-    builder: BUILDER_ADDRESS.toLowerCase(),
-    nonce,
-  };
-
-  const response = await fetch(`${HYPERLIQUID_API_URL}/exchange`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, nonce, signature: { r: sig.r, s: sig.s, v: sig.v } }),
-  });
-
-  const result = await response.json();
-  return { ok: response.ok, response: result };
-}
 /**
  * Check if user has existing position with different leverage (for warning)
  */
@@ -378,23 +328,21 @@ export function registerHandlers(bot: Telegraf) {
       return;
     }
 
+    const cacheBuster = Date.now();
+    const builderFeeUrl = `${MINIAPP_URL.replace(/\/$/, '')}/builderfee?v=${cacheBuster}`;
+
     await ctx.replyWithMarkdown(
       `💸 *Builder Fee Approval Only*\n\n` +
-        `Submitting builder fee approval now...`
-    );
-
-    try {
-      const result = await approveBuilderFeeWithAgent(user.agentPrivateKey);
-      if ((result as { response?: { status?: string; response?: string } }).response?.status === 'ok') {
-        await ctx.replyWithMarkdown(`✅ *Builder fee approved*`);
-      } else {
-        const err = (result as { response?: { response?: string } }).response?.response || JSON.stringify(result.response);
-        await ctx.replyWithMarkdown(`❌ *Builder fee approval failed*\n\n${err}`);
+        `This step ONLY approves the builder fee using your main wallet.\n` +
+        `Tap below to approve builder fee:`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💸 Approve Builder Fee (new)', web_app: { url: builderFeeUrl } }],
+          ],
+        },
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      await ctx.replyWithMarkdown(`❌ *Builder fee approval failed*\n\n${message}`);
-    }
+    );
   });
 
   // /bridge command - one-click bridge to Hyperliquid
