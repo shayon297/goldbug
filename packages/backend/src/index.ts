@@ -154,6 +154,12 @@ async function main() {
         return;
       }
 
+      console.log('[ApproveBuilderFee] Request:', {
+        walletAddress,
+        nonce,
+        builder: BUILDER_ADDRESS,
+      });
+
       const domain = {
         name: 'HyperliquidSignTransaction',
         version: '1',
@@ -392,6 +398,23 @@ async function main() {
 
       try {
         const hl = await getHyperliquidClient();
+
+        if (BUILDER_ADDRESS) {
+          const maxFeeRate = await hl.getMaxBuilderFee(user.walletAddress, BUILDER_ADDRESS);
+          const numeric = parseFloat(maxFeeRate.replace('%', ''));
+          const approved = !Number.isNaN(numeric) && numeric > 0;
+
+          if (!approved) {
+            console.log('[AuthComplete] Builder fee not approved, prompting reauth');
+            await bot.telegram.sendMessage(
+              Number(telegramUserId),
+              `🔒 Builder fee not approved yet.\n` +
+                `Please run /reauth to approve it, then your pending order will execute.`,
+            );
+            res.json({ success: false, orderExecuted: false, reason: 'builder_fee_not_approved' });
+            return;
+          }
+        }
         
         const result = await hl.placeOrder(user.agentPrivateKey, user.walletAddress, {
           side: pendingOrder.side,
