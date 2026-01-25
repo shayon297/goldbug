@@ -104,8 +104,9 @@ export default function ApproveBuilderFeePage() {
 
         // Close Mini App after 2 seconds
         setTimeout(() => {
-          if (window.Telegram?.WebApp) {
-            window.Telegram.WebApp.close();
+          const tg = (window as any).Telegram?.WebApp;
+          if (tg) {
+            tg.close();
           }
         }, 2000);
       } else {
