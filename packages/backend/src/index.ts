@@ -219,6 +219,22 @@ async function main() {
     }
   });
 
+  // Client log endpoint for Mini App diagnostics
+  app.post('/api/client-log', registrationLimiter, async (req: Request, res: Response) => {
+    try {
+      const { scope, message, data } = req.body as {
+        scope?: string;
+        message?: string;
+        data?: Record<string, unknown>;
+      };
+
+      console.log('[ClientLog]', { scope, message, data });
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to log client event' });
+    }
+  });
+
   // Registration endpoint (from Mini App)
   app.post('/api/register', registrationLimiter, async (req: Request, res: Response) => {
     try {

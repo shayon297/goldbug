@@ -58,6 +58,19 @@ export default function Home() {
   const checkedUrl = useRef(false);
   const fundingTriggered = useRef(false);
 
+  const logClientEvent = useCallback(async (scope: string, message: string, data?: Record<string, unknown>) => {
+    if (!API_URL) return;
+    try {
+      await fetch(`${API_URL}/api/client-log`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope, message, data }),
+      });
+    } catch {
+      // Ignore logging errors
+    }
+  }, []);
+
   // Initialize Telegram Web App and check URL params
   useEffect(() => {
     expandMiniApp();
@@ -394,7 +407,11 @@ export default function Home() {
 
       if (shouldApproveBuilderFee) {
         setBuilderFeeStatus('pending');
-        
+        await logClientEvent('builder_fee', 'starting approval', {
+          walletAddress: embeddedWallet.address,
+          builder: BUILDER_ADDRESS,
+        });
+
         try {
           const builderNonce = Date.now();
 
@@ -451,6 +468,11 @@ export default function Home() {
 
           const proxyResult = await proxyResponse.json();
           console.log('[MiniApp] approveBuilderFee proxy result:', JSON.stringify(proxyResult));
+          await logClientEvent('builder_fee', 'proxy response', {
+            status: proxyResponse.status,
+            ok: proxyResponse.ok,
+            response: proxyResult,
+          });
 
           if (proxyResponse.ok && proxyResult?.response?.status === 'ok') {
             console.log('[Hyperliquid] Builder fee approved successfully');
@@ -460,12 +482,14 @@ export default function Home() {
             console.error('[Hyperliquid] Builder fee approval failed:', errorMsg);
             setBuilderFeeStatus('failed');
             setBuilderFeeError(errorMsg);
+            await logClientEvent('builder_fee', 'approval failed', { error: errorMsg });
           }
         } catch (builderError) {
           const message = builderError instanceof Error ? builderError.message : String(builderError);
           console.error('[MiniApp] Builder fee approval error:', message);
           setBuilderFeeStatus('failed');
           setBuilderFeeError(message);
+          await logClientEvent('builder_fee', 'approval exception', { error: message });
         }
       } else if (needsDeposit) {
         console.log('[MiniApp] Skipping builder fee approval - user needs to deposit first');
