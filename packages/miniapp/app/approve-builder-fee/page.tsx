@@ -6,7 +6,7 @@ import { expandMiniApp, getTelegramUser, closeMiniApp } from '@/lib/telegram';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 const BUILDER_ADDRESS = process.env.NEXT_PUBLIC_BUILDER_ADDRESS || '';
-const BUILDER_MAX_FEE_RATE = '0.1%';
+const BUILDER_MAX_FEE_RATE = '0.1%'; // Maximum builder fee rate
 
 export default function ApproveBuilderFeePage() {
   const privy = usePrivy();
