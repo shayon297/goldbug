@@ -89,6 +89,12 @@ export default function Home() {
         setWantsBridge(true);
       } else if (action === 'reauth') {
         console.log('[MiniApp] Reauth action detected');
+        const version = params.get('v') || hashParams.get('v');
+        if (!version) {
+          setError('Please use the newest /reauth button from the bot.');
+          setStep('error');
+          return;
+        }
         setWantsReauth(true);
       } else if (action === 'onramp') {
         console.log('[MiniApp] Onramp action detected');
