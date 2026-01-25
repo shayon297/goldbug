@@ -297,6 +297,7 @@ export function registerHandlers(bot: Telegraf) {
       return;
     }
 
+    const cacheBuster = Date.now();
     await ctx.replyWithMarkdown(
       `🔑 *Re-authorize Trading Agent*\n\n` +
       `If your trades are failing, you may need to re-authorize your agent wallet on Hyperliquid.\n\n` +
@@ -304,7 +305,7 @@ export function registerHandlers(bot: Telegraf) {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🔑 Re-authorize Agent', web_app: { url: `${MINIAPP_URL}?action=reauth` } }],
+            [{ text: '🔑 Re-authorize Agent', web_app: { url: `${MINIAPP_URL}?action=reauth&v=${cacheBuster}` } }],
           ],
         },
       }
