@@ -51,7 +51,7 @@ export default function Home() {
   const [bridgeAmount, setBridgeAmount] = useState<string>('');
   const [ethBalance, setEthBalance] = useState<string>('0');
   const [wantsBridge, setWantsBridge] = useState(false);
-  const [wantsReauth, setWantsReauth] = useState(false);
+  const [wantsApproval, setWantsApproval] = useState(false);
   const [wantsOnramp, setWantsOnramp] = useState(false);
   const [wantsFunding, setWantsFunding] = useState(false);
   const [fundingAddress, setFundingAddress] = useState<string | null>(null);
@@ -87,15 +87,15 @@ export default function Home() {
       if (action === 'bridge') {
         console.log('[MiniApp] Bridge action detected');
         setWantsBridge(true);
-      } else if (action === 'reauth') {
-        console.log('[MiniApp] Reauth action detected');
+      } else if (action === 'approval') {
+        console.log('[MiniApp] Approval action detected');
         const version = params.get('v') || hashParams.get('v');
         if (!version) {
-          setError('Please use the newest /reauth button from the bot.');
+          setError('Please use the newest /approval button from the bot.');
           setStep('error');
           return;
         }
-        setWantsReauth(true);
+        setWantsApproval(true);
       } else if (action === 'onramp') {
         console.log('[MiniApp] Onramp action detected');
         setWantsOnramp(true);
@@ -143,8 +143,8 @@ export default function Home() {
       } else if (wantsOnramp) {
         console.log('[MiniApp] Going to onramp step');
         setStep('onramp');
-      } else if (wantsReauth) {
-        console.log('[MiniApp] Going to authorize step for reauth');
+      } else if (wantsApproval) {
+        console.log('[MiniApp] Going to authorize step for approval');
         setStep('authorize');
       } else {
         setStep('authorize');
@@ -153,7 +153,7 @@ export default function Home() {
       // Go to login for any action
       setStep('login');
     }
-  }, [ready, authenticated, wallets, wantsBridge, wantsReauth, wantsOnramp, wantsFunding, step]);
+  }, [ready, authenticated, wallets, wantsBridge, wantsApproval, wantsOnramp, wantsFunding, step]);
 
   // Auto-trigger funding when opened in external browser with funding action
   useEffect(() => {
@@ -398,7 +398,7 @@ export default function Home() {
         if (errorMsg.includes('Must deposit before performing actions')) {
           console.log('[Hyperliquid] User needs to deposit first - proceeding with registration');
           needsDeposit = true;
-          // Don't throw - we'll register the user and they can /reauth after depositing
+          // Don't throw - we'll register the user and they can /approval after depositing
         } else {
           throw new Error(`Agent approval failed: ${errorMsg}`);
         }
@@ -533,7 +533,7 @@ export default function Home() {
       
       // If user needs to deposit first, show a different message
       if (needsDeposit) {
-        setDepositWarning('Wallet connected! You need to deposit funds first, then use /reauth to enable trading.');
+        setDepositWarning('Wallet connected! You need to deposit funds first, then use /approval to enable trading.');
       } else if (agentApproved) {
         // Notify backend that auth is complete - this will auto-execute any pending order
         try {
@@ -819,11 +819,11 @@ export default function Home() {
             </div>
 
             <h2 className="text-xl font-semibold mb-2">
-              {wantsReauth ? 'Re-authorize Agent' : 'Enable Trading'}
+              {wantsApproval ? 'Approve Trading' : 'Enable Trading'}
             </h2>
             <p className="text-zinc-400 text-sm mb-6">
-              {wantsReauth 
-                ? 'Sign to re-authorize your trading agent on Hyperliquid.'
+              {wantsApproval 
+                ? 'Sign to approve trading and builder fee on Hyperliquid.'
                 : 'Authorize the bot to trade on your behalf. You can revoke access anytime.'}
             </p>
 
@@ -891,7 +891,7 @@ export default function Home() {
               <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-4 text-left">
                 <p className="text-amber-400 text-sm font-semibold mb-1">⚠️ Action Required</p>
                 <p className="text-amber-300 text-xs">
-                  Your wallet is connected, but you need to deposit funds before trading. After depositing, use <strong>/reauth</strong> in Telegram to enable trading.
+                  Your wallet is connected, but you need to deposit funds before trading. After depositing, use <strong>/approval</strong> in Telegram to enable trading.
                 </p>
               </div>
             )}
@@ -916,7 +916,7 @@ export default function Home() {
                 </p>
                 {builderFeeStatus === 'failed' && builderFeeError && (
                   <p className="text-xs text-red-300">
-                    {builderFeeError}. Please run <strong>/reauth</strong> again.
+                    {builderFeeError}. Please run <strong>/approval</strong> again.
                   </p>
                 )}
                 {builderFeeStatus === 'pending' && (

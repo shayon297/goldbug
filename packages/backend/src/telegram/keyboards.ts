@@ -194,7 +194,7 @@ export function closeConfirmKeyboard() {
 export function authorizeKeyboard(miniAppUrl: string) {
   const cacheBuster = Date.now();
   return Markup.inlineKeyboard([
-    [Markup.button.webApp('🔐 Authorize Trading', `${miniAppUrl}?action=reauth&v=${cacheBuster}`)],
+    [Markup.button.webApp('✅ Approve Trading', `${miniAppUrl}?action=approval&v=${cacheBuster}`)],
     [Markup.button.callback('🏠 Main Menu', 'action:menu')],
   ]);
 }

@@ -287,8 +287,8 @@ export function registerHandlers(bot: Telegraf) {
     );
   });
 
-  // /reauth command - re-authorize agent on Hyperliquid
-  bot.command('reauth', async (ctx) => {
+  // /approval command - approve builder fee + agent authorization
+  bot.command('approval', async (ctx) => {
     const telegramId = BigInt(ctx.from.id);
     const user = await getUserByTelegramId(telegramId);
 
@@ -299,13 +299,13 @@ export function registerHandlers(bot: Telegraf) {
 
     const cacheBuster = Date.now();
     await ctx.replyWithMarkdown(
-      `🔑 *Re-authorize Trading Agent*\n\n` +
-      `If your trades are failing, you may need to re-authorize your agent wallet on Hyperliquid.\n\n` +
-      `Tap below to sign the authorization:`,
+      `✅ *Approve Trading*\n\n` +
+        `This step approves your trading agent and builder fee.\n\n` +
+        `Tap below to sign the approval:`,
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🧪🔑 Re-authorize Agent (new)', web_app: { url: `${MINIAPP_URL}?action=reauth&v=${cacheBuster}` } }],
+            [{ text: '✅ Approve Trading (new)', web_app: { url: `${MINIAPP_URL}?action=approval&v=${cacheBuster}` } }],
           ],
         },
       }

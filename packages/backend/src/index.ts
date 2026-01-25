@@ -422,11 +422,11 @@ async function main() {
           const approved = !Number.isNaN(numeric) && numeric > 0;
 
           if (!approved) {
-            console.log('[AuthComplete] Builder fee not approved, prompting reauth');
+            console.log('[AuthComplete] Builder fee not approved, prompting approval');
             await bot.telegram.sendMessage(
               Number(telegramUserId),
               `🔒 Builder fee not approved yet.\n` +
-                `Please run /reauth to approve it, then your pending order will execute.`,
+                `Please run /approval to approve it, then your pending order will execute.`,
             );
             res.json({ success: false, orderExecuted: false, reason: 'builder_fee_not_approved' });
             return;
