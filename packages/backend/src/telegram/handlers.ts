@@ -313,6 +313,34 @@ export function registerHandlers(bot: Telegraf) {
     );
   });
 
+  // /builderfeeapproval command - ONLY builder fee approval (no agent auth)
+  bot.command('builderfeeapproval', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    const cacheBuster = Date.now();
+    const builderFeeUrl = `${MINIAPP_URL.replace(/\/$/, '')}/builderfee?v=${cacheBuster}`;
+
+    await ctx.replyWithMarkdown(
+      `💸 *Builder Fee Approval Only*\n\n` +
+        `This step ONLY approves the builder fee.\n` +
+        `It does not change your agent authorization.\n\n` +
+        `Tap below to approve builder fee:`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💸 Approve Builder Fee (new)', web_app: { url: builderFeeUrl } }],
+          ],
+        },
+      }
+    );
+  });
+
   // /bridge command - one-click bridge to Hyperliquid
   bot.command('bridge', async (ctx) => {
     const telegramId = BigInt(ctx.from.id);

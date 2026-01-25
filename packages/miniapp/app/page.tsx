@@ -52,6 +52,7 @@ export default function Home() {
   const [ethBalance, setEthBalance] = useState<string>('0');
   const [wantsBridge, setWantsBridge] = useState(false);
   const [wantsApproval, setWantsApproval] = useState(false);
+  const [wantsBuilderFeeOnly, setWantsBuilderFeeOnly] = useState(false);
   const [wantsOnramp, setWantsOnramp] = useState(false);
   const [wantsFunding, setWantsFunding] = useState(false);
   const [fundingAddress, setFundingAddress] = useState<string | null>(null);
@@ -98,6 +99,16 @@ export default function Home() {
         }
         setWantsApproval(true);
         void logClientEvent('approval', 'action_detected', { version });
+      } else if (action === 'builderfee') {
+        console.log('[MiniApp] Builder fee-only action detected');
+        const version = params.get('v') || hashParams.get('v');
+        if (!version) {
+          setError('Please use the newest /builderfeeapproval button from the bot.');
+          setStep('error');
+          return;
+        }
+        setWantsBuilderFeeOnly(true);
+        void logClientEvent('builder_fee', 'builder_fee_only_action_detected', { version });
       } else if (action === 'onramp') {
         console.log('[MiniApp] Onramp action detected');
         setWantsOnramp(true);
@@ -145,7 +156,7 @@ export default function Home() {
       } else if (wantsOnramp) {
         console.log('[MiniApp] Going to onramp step');
         setStep('onramp');
-      } else if (wantsApproval) {
+      } else if (wantsApproval || wantsBuilderFeeOnly) {
         console.log('[MiniApp] Going to authorize step for approval');
         setStep('authorize');
       } else {
@@ -155,7 +166,7 @@ export default function Home() {
       // Go to login for any action
       setStep('login');
     }
-  }, [ready, authenticated, wallets, wantsBridge, wantsApproval, wantsOnramp, wantsFunding, step]);
+  }, [ready, authenticated, wallets, wantsBridge, wantsApproval, wantsBuilderFeeOnly, wantsOnramp, wantsFunding, step]);
 
   // Auto-trigger funding when opened in external browser with funding action
   useEffect(() => {
@@ -377,41 +388,45 @@ export default function Home() {
       };
       console.log('[MiniApp] Sending to Hyperliquid:', JSON.stringify(requestBody, null, 2));
       
-      const hlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
-
-      const hlResult = await hlResponse.json();
-      console.log('[Hyperliquid] approveAgent result:', JSON.stringify(hlResult));
-      await logClientEvent('approval', 'approve_agent_response', {
-        walletAddress: embeddedWallet.address,
-        response: hlResult,
-      });
-
-      // Check if approval succeeded or if user needs to deposit first
       let agentApproved = false;
       let needsDeposit = false;
-      
-      if (hlResult.status === 'ok') {
-        agentApproved = true;
-        console.log('[Hyperliquid] Agent approved successfully:', agentAddress);
-      } else {
-        const errorMsg = hlResult.response || hlResult.error || JSON.stringify(hlResult);
-        
-        // Check if this is the "must deposit first" error - allow registration anyway
-        if (errorMsg.includes('Must deposit before performing actions')) {
-          console.log('[Hyperliquid] User needs to deposit first - proceeding with registration');
-          needsDeposit = true;
-          await logClientEvent('approval', 'needs_deposit', {
-            walletAddress: embeddedWallet.address,
-            reason: errorMsg,
-          });
-          // Don't throw - we'll register the user and they can /approval after depositing
+
+      if (!wantsBuilderFeeOnly) {
+        const hlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        const hlResult = await hlResponse.json();
+        console.log('[Hyperliquid] approveAgent result:', JSON.stringify(hlResult));
+        await logClientEvent('approval', 'approve_agent_response', {
+          walletAddress: embeddedWallet.address,
+          response: hlResult,
+        });
+
+        // Check if approval succeeded or if user needs to deposit first
+        if (hlResult.status === 'ok') {
+          agentApproved = true;
+          console.log('[Hyperliquid] Agent approved successfully:', agentAddress);
         } else {
-          throw new Error(`Agent approval failed: ${errorMsg}`);
+          const errorMsg = hlResult.response || hlResult.error || JSON.stringify(hlResult);
+
+          // Check if this is the "must deposit first" error - allow registration anyway
+          if (errorMsg.includes('Must deposit before performing actions')) {
+            console.log('[Hyperliquid] User needs to deposit first - proceeding with registration');
+            needsDeposit = true;
+            await logClientEvent('approval', 'needs_deposit', {
+              walletAddress: embeddedWallet.address,
+              reason: errorMsg,
+            });
+            // Don't throw - we'll register the user and they can /approval after depositing
+          } else {
+            throw new Error(`Agent approval failed: ${errorMsg}`);
+          }
         }
+      } else {
+        console.log('[MiniApp] Skipping agent approval (builder fee only)');
       }
 
       // Approve builder fee if builder address is configured (always try, even if agent approval had issues)
@@ -525,34 +540,38 @@ export default function Home() {
       // Get Telegram init data for verification
       const initData = getTelegramInitData();
 
-      // Register with backend
-      const response = await fetch(`${API_URL}/api/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(initData && { 'X-Telegram-Init-Data': initData }),
-        },
-        body: JSON.stringify({
-          privyToken: accessToken,
-          telegramUserId: telegramUser.id.toString(),
-          agentAddress,
-          agentPrivateKey,
-          agentApproved, // Tell backend if agent is approved on Hyperliquid
-        }),
-      });
+      if (!wantsBuilderFeeOnly) {
+        // Register with backend
+        const response = await fetch(`${API_URL}/api/register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(initData && { 'X-Telegram-Init-Data': initData }),
+          },
+          body: JSON.stringify({
+            privyToken: accessToken,
+            telegramUserId: telegramUser.id.toString(),
+            agentAddress,
+            agentPrivateKey,
+            agentApproved, // Tell backend if agent is approved on Hyperliquid
+          }),
+        });
 
-      if (!response.ok) {
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || 'Registration failed');
+        }
+
         const data = await response.json();
-        throw new Error(data.error || 'Registration failed');
+        setRegisteredWallet(data.walletAddress || embeddedWallet.address);
+      } else {
+        setRegisteredWallet(embeddedWallet.address);
       }
-
-      const data = await response.json();
-      setRegisteredWallet(data.walletAddress || embeddedWallet.address);
       
       // If user needs to deposit first, show a different message
       if (needsDeposit) {
         setDepositWarning('Wallet connected! You need to deposit funds first, then use /approval to enable trading.');
-      } else if (agentApproved) {
+      } else if (agentApproved && !wantsBuilderFeeOnly) {
         // Notify backend that auth is complete - this will auto-execute any pending order
         try {
           await fetch(`${API_URL}/api/auth-complete`, {
