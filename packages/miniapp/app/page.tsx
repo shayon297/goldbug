@@ -397,9 +397,8 @@ export default function Home() {
         
         try {
           const builderNonce = Date.now();
-          
-          // EIP-712 message for ApproveBuilderFee
-          // MUST match Python SDK exactly: NO signatureChainId in message or types
+
+          // EIP-712 message for ApproveBuilderFee (Python SDK semantics)
           const builderEip712Message = {
             hyperliquidChain: 'Mainnet',
             maxFeeRate: BUILDER_MAX_FEE_RATE,
@@ -407,14 +406,12 @@ export default function Home() {
             nonce: builderNonce,
           };
 
-          // EIP-712 typed data for ApproveBuilderFee
-          // Use Arbitrum One chainId (42161) to match the signing chain
-          // types do NOT include signatureChainId
+          // EIP-712 typed data (Python SDK: chainId=421614, signatureChainId=0x66eee)
           const builderTypedData = {
             domain: {
               name: 'HyperliquidSignTransaction',
               version: '1',
-              chainId: 42161, // 0xa4b1 - Arbitrum One
+              chainId: 421614, // 0x66eee
               verifyingContract: '0x0000000000000000000000000000000000000000',
             },
             types: {
@@ -423,6 +420,12 @@ export default function Home() {
                 { name: 'maxFeeRate', type: 'string' },
                 { name: 'builder', type: 'address' },
                 { name: 'nonce', type: 'uint64' },
+              ],
+              EIP712Domain: [
+                { name: 'name', type: 'string' },
+                { name: 'version', type: 'string' },
+                { name: 'chainId', type: 'uint256' },
+                { name: 'verifyingContract', type: 'address' },
               ],
             },
             primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
@@ -436,40 +439,24 @@ export default function Home() {
             params: [embeddedWallet.address, JSON.stringify(builderTypedData)],
           });
 
-          const builderSig = ethers.Signature.from(builderSignature as string);
-
-          // API action - includes signatureChainId (required by API)
-          const builderApiAction = {
-            type: 'approveBuilderFee',
-            hyperliquidChain: 'Mainnet',
-            signatureChainId: '0xa4b1', // Arbitrum One
-            maxFeeRate: BUILDER_MAX_FEE_RATE,
-            builder: BUILDER_ADDRESS.toLowerCase(),
-            nonce: builderNonce,
-          };
-
-          const builderRequestBody = {
-            action: builderApiAction,
-            nonce: builderNonce,
-            signature: { r: builderSig.r, s: builderSig.s, v: builderSig.v },
-          };
-
-          console.log('[MiniApp] Sending builder fee approval to Hyperliquid:', JSON.stringify(builderRequestBody, null, 2));
-
-          const builderHlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
+          const proxyResponse = await fetch(`${API_URL}/api/approve-builder-fee`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(builderRequestBody),
+            body: JSON.stringify({
+              walletAddress: embeddedWallet.address,
+              signature: builderSignature,
+              nonce: builderNonce,
+            }),
           });
 
-          const builderHlResult = await builderHlResponse.json();
-          console.log('[Hyperliquid] approveBuilderFee result:', JSON.stringify(builderHlResult));
+          const proxyResult = await proxyResponse.json();
+          console.log('[MiniApp] approveBuilderFee proxy result:', JSON.stringify(proxyResult));
 
-          if (builderHlResult.status === 'ok') {
+          if (proxyResponse.ok && proxyResult?.response?.status === 'ok') {
             console.log('[Hyperliquid] Builder fee approved successfully');
             setBuilderFeeStatus('approved');
           } else {
-            const errorMsg = builderHlResult.response || builderHlResult.error || JSON.stringify(builderHlResult);
+            const errorMsg = proxyResult?.response?.response || proxyResult?.error || 'Builder fee approval failed';
             console.error('[Hyperliquid] Builder fee approval failed:', errorMsg);
             setBuilderFeeStatus('failed');
             setBuilderFeeError(errorMsg);

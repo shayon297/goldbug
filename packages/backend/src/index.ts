@@ -19,6 +19,9 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || 'webhook-secret';
 const MINIAPP_URL = process.env.MINIAPP_URL || '';
 const BUILDER_ADDRESS = process.env.BUILDER_ADDRESS || '';
+const BUILDER_MAX_FEE_RATE = process.env.BUILDER_MAX_FEE_RATE || '0.1%';
+const BUILDER_SIGNATURE_CHAIN_ID = '0x66eee';
+const BUILDER_DOMAIN_CHAIN_ID = 421614;
 
 // Gas drip configuration
 const GAS_FUNDER_PRIVATE_KEY = process.env.GAS_FUNDER_PRIVATE_KEY || '';
@@ -119,6 +122,94 @@ async function main() {
       res.json({ approved, maxFeeRate });
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch builder fee status' });
+    }
+  });
+
+  // Approve builder fee via backend proxy (verifies signer, then submits to Hyperliquid)
+  app.post('/api/approve-builder-fee', registrationLimiter, async (req: Request, res: Response) => {
+    try {
+      const { walletAddress, signature, nonce } = req.body as {
+        walletAddress?: string;
+        signature?: string;
+        nonce?: number;
+      };
+
+      if (!walletAddress || !ethers.isAddress(walletAddress)) {
+        res.status(400).json({ error: 'Invalid wallet address' });
+        return;
+      }
+
+      if (!signature || typeof signature !== 'string') {
+        res.status(400).json({ error: 'Missing signature' });
+        return;
+      }
+
+      if (!nonce || typeof nonce !== 'number') {
+        res.status(400).json({ error: 'Missing nonce' });
+        return;
+      }
+
+      if (!BUILDER_ADDRESS) {
+        res.status(503).json({ error: 'Builder fee not configured' });
+        return;
+      }
+
+      const domain = {
+        name: 'HyperliquidSignTransaction',
+        version: '1',
+        chainId: BUILDER_DOMAIN_CHAIN_ID,
+        verifyingContract: '0x0000000000000000000000000000000000000000',
+      };
+
+      const types = {
+        'HyperliquidTransaction:ApproveBuilderFee': [
+          { name: 'hyperliquidChain', type: 'string' },
+          { name: 'maxFeeRate', type: 'string' },
+          { name: 'builder', type: 'address' },
+          { name: 'nonce', type: 'uint64' },
+        ],
+      };
+
+      const message = {
+        hyperliquidChain: 'Mainnet',
+        maxFeeRate: BUILDER_MAX_FEE_RATE,
+        builder: BUILDER_ADDRESS.toLowerCase(),
+        nonce,
+      };
+
+      const recovered = ethers.verifyTypedData(domain, types, message, signature);
+      if (recovered.toLowerCase() !== walletAddress.toLowerCase()) {
+        res.status(401).json({ error: 'Signature does not match wallet address' });
+        return;
+      }
+
+      const action = {
+        type: 'approveBuilderFee',
+        hyperliquidChain: 'Mainnet',
+        signatureChainId: BUILDER_SIGNATURE_CHAIN_ID,
+        maxFeeRate: BUILDER_MAX_FEE_RATE,
+        builder: BUILDER_ADDRESS.toLowerCase(),
+        nonce,
+      };
+
+      const hlResponse = await fetch('https://api.hyperliquid.xyz/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          nonce,
+          signature: ethers.Signature.from(signature),
+        }),
+      });
+
+      const hlResult = await hlResponse.json();
+      console.log('[Hyperliquid] approveBuilderFee response:', JSON.stringify(hlResult));
+
+      res.json({ ok: true, response: hlResult });
+    } catch (error) {
+      console.error('[ApproveBuilderFee] Error:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      res.status(500).json({ error: message });
     }
   });
 
