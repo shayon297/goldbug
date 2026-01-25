@@ -20,8 +20,10 @@ const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || 'webhook-secret';
 const MINIAPP_URL = process.env.MINIAPP_URL || '';
 const BUILDER_ADDRESS = process.env.BUILDER_ADDRESS || '';
 const BUILDER_MAX_FEE_RATE = process.env.BUILDER_MAX_FEE_RATE || '0.1%';
-const BUILDER_SIGNATURE_CHAIN_ID = '0x66eee';
-const BUILDER_DOMAIN_CHAIN_ID = 421614;
+const BUILDER_SIGNATURE_CHAIN_ID = '0xa4b1';
+const BUILDER_DOMAIN_CHAIN_ID = 42161;
+const BUILDER_ALLOWED_DOMAIN_CHAIN_IDS = new Set([42161, 421614]);
+const BUILDER_ALLOWED_SIGNATURE_CHAIN_IDS = new Set(['0xa4b1', '0x66eee']);
 
 // Gas drip configuration
 const GAS_FUNDER_PRIVATE_KEY = process.env.GAS_FUNDER_PRIVATE_KEY || '';
@@ -128,10 +130,12 @@ async function main() {
   // Approve builder fee via backend proxy (verifies signer, then submits to Hyperliquid)
   app.post('/api/approve-builder-fee', registrationLimiter, async (req: Request, res: Response) => {
     try {
-      const { walletAddress, signature, nonce } = req.body as {
+      const { walletAddress, signature, nonce, domainChainId, signatureChainId } = req.body as {
         walletAddress?: string;
         signature?: string;
         nonce?: number;
+        domainChainId?: number;
+        signatureChainId?: string;
       };
 
       if (!walletAddress || !ethers.isAddress(walletAddress)) {
@@ -154,16 +158,27 @@ async function main() {
         return;
       }
 
+      const resolvedDomainChainId =
+        typeof domainChainId === 'number' && BUILDER_ALLOWED_DOMAIN_CHAIN_IDS.has(domainChainId)
+          ? domainChainId
+          : BUILDER_DOMAIN_CHAIN_ID;
+      const resolvedSignatureChainId =
+        typeof signatureChainId === 'string' && BUILDER_ALLOWED_SIGNATURE_CHAIN_IDS.has(signatureChainId)
+          ? signatureChainId
+          : BUILDER_SIGNATURE_CHAIN_ID;
+
       console.log('[ApproveBuilderFee] Request:', {
         walletAddress,
         nonce,
         builder: BUILDER_ADDRESS,
+        domainChainId: resolvedDomainChainId,
+        signatureChainId: resolvedSignatureChainId,
       });
 
       const domain = {
         name: 'HyperliquidSignTransaction',
         version: '1',
-        chainId: BUILDER_DOMAIN_CHAIN_ID,
+        chainId: resolvedDomainChainId,
         verifyingContract: '0x0000000000000000000000000000000000000000',
       };
 
@@ -193,7 +208,7 @@ async function main() {
       const action = {
         type: 'approveBuilderFee',
         hyperliquidChain: 'Mainnet',
-        signatureChainId: BUILDER_SIGNATURE_CHAIN_ID,
+        signatureChainId: resolvedSignatureChainId,
         maxFeeRate: BUILDER_MAX_FEE_RATE,
         builder: BUILDER_ADDRESS.toLowerCase(),
         nonce,
