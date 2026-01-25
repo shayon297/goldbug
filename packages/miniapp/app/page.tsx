@@ -514,6 +514,13 @@ export default function Home() {
             console.error('[Hyperliquid] Builder fee approval failed:', errorMsg);
             setBuilderFeeStatus('failed');
             setBuilderFeeError(errorMsg);
+            if (typeof errorMsg === 'string' && errorMsg.includes('Must deposit before performing actions')) {
+              const match = errorMsg.match(/User:\s*(0x[a-fA-F0-9]{40})/);
+              const addressForDeposit = match?.[1] || embeddedWallet.address;
+              setDepositWarning(
+                `Deposit USDC to ${addressForDeposit} on Hyperliquid, then run /approval to enable trading.`
+              );
+            }
             await logClientEvent('builder_fee', 'approval failed', { error: errorMsg });
           }
         } catch (builderError) {
@@ -574,7 +581,9 @@ export default function Home() {
       
       // If user needs to deposit first, show a different message
       if (needsDeposit) {
-        setDepositWarning('Wallet connected! You need to deposit funds first, then use /approval to enable trading.');
+        setDepositWarning(
+          `Wallet connected! Deposit USDC to ${embeddedWallet.address} on Hyperliquid, then use /approval to enable trading.`
+        );
       } else if (agentApproved && !wantsBuilderFeeOnly) {
         // Notify backend that auth is complete - this will auto-execute any pending order
         try {
@@ -931,9 +940,7 @@ export default function Home() {
             {depositWarning && (
               <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 mb-4 text-left">
                 <p className="text-amber-400 text-sm font-semibold mb-1">⚠️ Action Required</p>
-                <p className="text-amber-300 text-xs">
-                  Your wallet is connected, but you need to deposit funds before trading. After depositing, use <strong>/approval</strong> in Telegram to enable trading.
-                </p>
+                <p className="text-amber-300 text-xs">{depositWarning}</p>
               </div>
             )}
 
