@@ -83,7 +83,11 @@ export default function Home() {
       checkedUrl.current = true;
       const params = new URLSearchParams(window.location.search);
       const hashParams = new URLSearchParams(window.location.hash.replace('#', '?'));
-      const actionFromPath = window.location.pathname.includes('/approval') ? 'approval' : null;
+      const actionFromPath = window.location.pathname.includes('/builderfee')
+        ? 'builderfee'
+        : window.location.pathname.includes('/approval')
+          ? 'approval'
+          : null;
       const action = actionFromPath || params.get('action') || hashParams.get('action');
       
       if (action === 'bridge') {
