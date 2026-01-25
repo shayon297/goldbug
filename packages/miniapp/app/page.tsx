@@ -875,6 +875,9 @@ export default function Home() {
               {wantsApproval 
                 ? 'Sign to approve trading and builder fee on Hyperliquid.'
                 : 'Authorize the bot to trade on your behalf. You can revoke access anytime.'}
+              <span className="block mt-2 text-zinc-500">
+                This must be the same wallet you funded on Hyperliquid.
+              </span>
             </p>
 
             <div className="bg-zinc-800/50 rounded-lg p-3 mb-6 text-left">
