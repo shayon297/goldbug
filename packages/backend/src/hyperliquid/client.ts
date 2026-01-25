@@ -184,6 +184,20 @@ export class HyperliquidClient {
   }
 
   /**
+   * Check if builder fee is approved for a user
+   */
+  async isBuilderFeeApproved(userAddress: string, builderAddress: string): Promise<boolean> {
+    try {
+      const maxFeeRate = await this.getMaxBuilderFee(userAddress, builderAddress);
+      const numeric = parseFloat(maxFeeRate.replace('%', ''));
+      return !Number.isNaN(numeric) && numeric > 0;
+    } catch (error) {
+      console.error('[Hyperliquid] Failed to check builder fee approval:', error);
+      return false;
+    }
+  }
+
+  /**
    * Get current price for the configured trading asset
    */
   async getGoldPrice(): Promise<number> {

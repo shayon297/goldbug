@@ -14,7 +14,8 @@ import {
   settingsKeyboard,
   ordersKeyboard,
   closeConfirmKeyboard,
-  authorizeKeyboard,
+  approveBuilderFeeKeyboard,
+  authorizeAgentKeyboard,
 } from './keyboards.js';
 import { parseTradeCommand, parseCloseCommand, formatTradeCommand, sanitizeInput } from './parser.js';
 import {
@@ -137,10 +138,6 @@ function formatWalletAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
-function isBuilderFeeApproved(maxFeeRate: string): boolean {
-  const numeric = parseFloat(maxFeeRate.replace('%', ''));
-  return !Number.isNaN(numeric) && numeric > 0;
-}
 
 /**
  * Register all bot command and callback handlers
@@ -287,63 +284,6 @@ export function registerHandlers(bot: Telegraf) {
     );
   });
 
-  // /approval command - approve builder fee + agent authorization
-  bot.command('approval', async (ctx) => {
-    const telegramId = BigInt(ctx.from.id);
-    const user = await getUserByTelegramId(telegramId);
-
-    if (!user) {
-      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
-      return;
-    }
-
-    const cacheBuster = Date.now();
-    const approvalUrl = `${MINIAPP_URL.replace(/\/$/, '')}/approval?v=${cacheBuster}`;
-    await ctx.replyWithMarkdown(
-      `✅ *Approve Trading*\n\n` +
-        `This step approves your trading agent and builder fee.\n\n` +
-        `Tap below to sign the approval:`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '✅ Approve Trading (new)', web_app: { url: approvalUrl } }],
-          ],
-        },
-      }
-    );
-  });
-
-  // /builderfeeapproval command - ONLY builder fee approval (no agent auth)
-  bot.command('builderfeeapproval', async (ctx) => {
-    const telegramId = BigInt(ctx.from.id);
-    const user = await getUserByTelegramId(telegramId);
-
-    if (!user) {
-      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
-      return;
-    }
-
-    if (!BUILDER_ADDRESS) {
-      await ctx.reply('Builder fee is not configured on the server yet.');
-      return;
-    }
-
-    const cacheBuster = Date.now();
-    const builderFeeUrl = `${MINIAPP_URL.replace(/\/$/, '')}/builderfee?v=${cacheBuster}`;
-
-    await ctx.replyWithMarkdown(
-      `💸 *Builder Fee Approval Only*\n\n` +
-        `This step ONLY approves the builder fee using your main wallet.\n` +
-        `Tap below to approve builder fee:`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '💸 Approve Builder Fee (new)', web_app: { url: builderFeeUrl } }],
-          ],
-        },
-      }
-    );
-  });
 
   // /bridge command - one-click bridge to Hyperliquid
   bot.command('bridge', async (ctx) => {
@@ -890,9 +830,11 @@ export function registerHandlers(bot: Telegraf) {
     try {
       const hl = await getHyperliquidClient();
 
-      if (BUILDER_ADDRESS) {
-        const maxFeeRate = await hl.getMaxBuilderFee(user.walletAddress, BUILDER_ADDRESS);
-        if (!isBuilderFeeApproved(maxFeeRate)) {
+      // Check builder fee approval if builder address is configured
+      if (BUILDER_ADDRESS && BUILDER_ADDRESS !== '0x...your_builder_wallet_address' && BUILDER_ADDRESS !== 'DISABLED') {
+        const isApproved = await hl.isBuilderFeeApproved(user.walletAddress, BUILDER_ADDRESS);
+        if (!isApproved) {
+          // Store pending order for auto-retry after approval
           await updateSession(telegramId, {
             ...session,
             step: 'idle',
@@ -910,7 +852,7 @@ export function registerHandlers(bot: Telegraf) {
               `Your account has not approved the builder fee yet.\n` +
               `Tap below to approve it, then your order will execute automatically.\n\n` +
               `_This is required to route trades through the bot._`,
-            { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
+            { parse_mode: 'Markdown', ...approveBuilderFeeKeyboard(MINIAPP_URL) }
           );
           return;
         }
@@ -972,7 +914,7 @@ export function registerHandlers(bot: Telegraf) {
             `Your wallet has funds but trading isn't enabled yet.\n` +
             `Tap below to authorize trading.\n\n` +
             `_Your order will execute automatically after authorization._`,
-            { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
+            { parse_mode: 'Markdown', ...authorizeAgentKeyboard(MINIAPP_URL) }
           );
         } else {
           await ctx.editMessageText(`❌ Order failed: ${errorMsg}`, mainMenuKeyboard());
@@ -1001,7 +943,7 @@ export function registerHandlers(bot: Telegraf) {
           `Your wallet has funds but trading isn't enabled yet.\n` +
           `Tap below to authorize trading.\n\n` +
           `_Your order will execute automatically after authorization._`,
-          { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
+          { parse_mode: 'Markdown', ...authorizeAgentKeyboard(MINIAPP_URL) }
         );
       } else {
         await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
@@ -1049,7 +991,7 @@ export function registerHandlers(bot: Telegraf) {
             `🔐 *Authorization Required*\n\n` +
             `Your wallet has funds but trading isn't enabled yet.\n` +
             `Tap below to authorize trading:`,
-            { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
+            { parse_mode: 'Markdown', ...authorizeAgentKeyboard(MINIAPP_URL) }
           );
         } else {
           await ctx.editMessageText(`❌ Failed to close: ${errorMsg}`, mainMenuKeyboard());
@@ -1064,7 +1006,7 @@ export function registerHandlers(bot: Telegraf) {
           `🔐 *Authorization Required*\n\n` +
           `Your wallet has funds but trading isn't enabled yet.\n` +
           `Tap below to authorize trading:`,
-          { parse_mode: 'Markdown', ...authorizeKeyboard(MINIAPP_URL) }
+          { parse_mode: 'Markdown', ...authorizeAgentKeyboard(MINIAPP_URL) }
         );
       } else {
         await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
@@ -1359,7 +1301,7 @@ async function handleCloseText(
       if (errorMsg.includes('does not exist') || errorMsg.includes('User or API Wallet')) {
         await ctx.replyWithMarkdown(
           `🔐 *Authorization Required*\n\nTap below to authorize trading:`,
-          authorizeKeyboard(MINIAPP_URL)
+          authorizeAgentKeyboard(MINIAPP_URL)
         );
       } else {
         await ctx.reply(`❌ Failed to close: ${errorMsg}`, mainMenuKeyboard());
@@ -1370,7 +1312,7 @@ async function handleCloseText(
     if (message.includes('does not exist') || message.includes('User or API Wallet')) {
       await ctx.replyWithMarkdown(
         `🔐 *Authorization Required*\n\nTap below to authorize trading:`,
-        authorizeKeyboard(MINIAPP_URL)
+        authorizeAgentKeyboard(MINIAPP_URL)
       );
     } else {
       await ctx.reply(`❌ Error: ${message}`, mainMenuKeyboard());

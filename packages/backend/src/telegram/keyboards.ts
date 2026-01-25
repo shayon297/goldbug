@@ -190,12 +190,22 @@ export function closeConfirmKeyboard() {
   ]);
 }
 
-// Authorize trading (for users who deposited but haven't authorized agent yet)
-export function authorizeKeyboard(miniAppUrl: string) {
+// Builder fee approval button (shown when builder fee not approved)
+export function approveBuilderFeeKeyboard(miniAppUrl: string) {
+  const cacheBuster = Date.now();
+  const approvalUrl = `${miniAppUrl.replace(/\/$/, '')}/approve-builder-fee?v=${cacheBuster}`;
+  return Markup.inlineKeyboard([
+    [Markup.button.webApp('💸 Approve Builder Fee', approvalUrl)],
+    [Markup.button.callback('❌ Cancel', 'confirm:no')],
+  ]);
+}
+
+// Agent authorization button (shown when agent not approved)
+export function authorizeAgentKeyboard(miniAppUrl: string) {
   const cacheBuster = Date.now();
   const approvalUrl = `${miniAppUrl.replace(/\/$/, '')}/approval?v=${cacheBuster}`;
   return Markup.inlineKeyboard([
-    [Markup.button.webApp('✅ Approve Trading', approvalUrl)],
+    [Markup.button.webApp('✅ Authorize Trading', approvalUrl)],
     [Markup.button.callback('🏠 Main Menu', 'action:menu')],
   ]);
 }
