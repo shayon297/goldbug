@@ -2,8 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
-import { ethers } from 'ethers';
-import { expandMiniApp, getTelegramUser, getTelegramInitData } from '@/lib/telegram';
+import { expandMiniApp, getTelegramUser } from '@/lib/telegram';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 const BUILDER_ADDRESS = process.env.NEXT_PUBLIC_BUILDER_ADDRESS || '';
