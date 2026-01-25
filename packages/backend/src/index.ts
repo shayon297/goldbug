@@ -184,6 +184,7 @@ async function main() {
       };
 
       const recovered = ethers.verifyTypedData(domain, types, message, signature);
+      console.log('[ApproveBuilderFee] Recovered signer:', recovered);
       if (recovered.toLowerCase() !== walletAddress.toLowerCase()) {
         res.status(401).json({ error: 'Signature does not match wallet address' });
         return;

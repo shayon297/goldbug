@@ -414,8 +414,6 @@ export default function Home() {
 
         try {
           const builderNonce = Date.now();
-
-          // EIP-712 message for ApproveBuilderFee (Python SDK semantics)
           const builderEip712Message = {
             hyperliquidChain: 'Mainnet',
             maxFeeRate: BUILDER_MAX_FEE_RATE,
@@ -423,12 +421,11 @@ export default function Home() {
             nonce: builderNonce,
           };
 
-          // EIP-712 typed data (Python SDK: chainId=421614, signatureChainId=0x66eee)
           const builderTypedData = {
             domain: {
               name: 'HyperliquidSignTransaction',
               version: '1',
-              chainId: 421614, // 0x66eee
+              chainId: 421614, // 0x66eee (Python SDK semantics)
               verifyingContract: '0x0000000000000000000000000000000000000000',
             },
             types: {
