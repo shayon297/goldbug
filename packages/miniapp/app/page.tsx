@@ -97,6 +97,7 @@ export default function Home() {
           return;
         }
         setWantsApproval(true);
+        void logClientEvent('approval', 'action_detected', { version });
       } else if (action === 'onramp') {
         console.log('[MiniApp] Onramp action detected');
         setWantsOnramp(true);
@@ -384,6 +385,10 @@ export default function Home() {
 
       const hlResult = await hlResponse.json();
       console.log('[Hyperliquid] approveAgent result:', JSON.stringify(hlResult));
+      await logClientEvent('approval', 'approve_agent_response', {
+        walletAddress: embeddedWallet.address,
+        response: hlResult,
+      });
 
       // Check if approval succeeded or if user needs to deposit first
       let agentApproved = false;
@@ -399,6 +404,10 @@ export default function Home() {
         if (errorMsg.includes('Must deposit before performing actions')) {
           console.log('[Hyperliquid] User needs to deposit first - proceeding with registration');
           needsDeposit = true;
+          await logClientEvent('approval', 'needs_deposit', {
+            walletAddress: embeddedWallet.address,
+            reason: errorMsg,
+          });
           // Don't throw - we'll register the user and they can /approval after depositing
         } else {
           throw new Error(`Agent approval failed: ${errorMsg}`);
@@ -497,6 +506,14 @@ export default function Home() {
         }
       } else if (needsDeposit) {
         console.log('[MiniApp] Skipping builder fee approval - user needs to deposit first');
+        await logClientEvent('builder_fee', 'skipped_needs_deposit', {
+          walletAddress: embeddedWallet.address,
+        });
+      } else {
+        await logClientEvent('builder_fee', 'skipped_unknown', {
+          walletAddress: embeddedWallet.address,
+          reason: 'shouldApproveBuilderFee=false',
+        });
       }
 
       // Get Privy access token
