@@ -20,8 +20,9 @@ const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET || 'webhook-secret';
 const MINIAPP_URL = process.env.MINIAPP_URL || '';
 const BUILDER_ADDRESS = process.env.BUILDER_ADDRESS || '';
 const BUILDER_MAX_FEE_RATE = process.env.BUILDER_MAX_FEE_RATE || '1%';
-const BUILDER_SIGNATURE_CHAIN_ID = '0xa4b1'; // Arbitrum One mainnet
-const BUILDER_DOMAIN_CHAIN_ID = 42161; // Arbitrum One mainnet
+// Match Python SDK: signatureChainId = 0x66eee for ALL user-signed actions
+const BUILDER_SIGNATURE_CHAIN_ID = '0x66eee'; // 421614 - used by Hyperliquid SDK
+const BUILDER_DOMAIN_CHAIN_ID = 421614; // parseInt('0x66eee', 16)
 
 // Gas drip configuration
 const GAS_FUNDER_PRIVATE_KEY = process.env.GAS_FUNDER_PRIVATE_KEY || '';

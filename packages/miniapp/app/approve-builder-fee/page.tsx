@@ -54,11 +54,14 @@ export default function ApproveBuilderFeePage() {
       const provider = await embeddedWallet.getEthereumProvider();
       const nonce = Date.now();
 
+      // Match Python SDK: signatureChainId = 0x66eee (421614) for ALL user-signed actions
+      const DOMAIN_CHAIN_ID = 421614; // parseInt('0x66eee', 16)
+      
       const typedData = {
         domain: {
           name: 'HyperliquidSignTransaction',
           version: '1',
-          chainId: 42161, // Arbitrum One mainnet
+          chainId: DOMAIN_CHAIN_ID,
           verifyingContract: '0x0000000000000000000000000000000000000000',
         },
         types: {

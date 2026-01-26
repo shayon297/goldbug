@@ -455,20 +455,17 @@ export default function Home() {
         });
 
         try {
-          const attemptApproval = async (domainChainId: number, signatureChainId: string) => {
+          const attemptApproval = async () => {
             const builderNonce = Date.now();
-            const builderEip712Message = {
-              hyperliquidChain: 'Mainnet',
-              maxFeeRate: BUILDER_MAX_FEE_RATE,
-              builder: BUILDER_ADDRESS.toLowerCase(),
-              nonce: builderNonce,
-            };
-
+            // Match Python SDK: signatureChainId = 0x66eee (421614), domain chainId = 421614
+            const SIGNATURE_CHAIN_ID = '0x66eee';
+            const DOMAIN_CHAIN_ID = 421614; // parseInt('0x66eee', 16)
+            
             const builderTypedData = {
               domain: {
                 name: 'HyperliquidSignTransaction',
                 version: '1',
-                chainId: domainChainId,
+                chainId: DOMAIN_CHAIN_ID,
                 verifyingContract: '0x0000000000000000000000000000000000000000',
               },
               types: {
@@ -486,7 +483,12 @@ export default function Home() {
                 ],
               },
               primaryType: 'HyperliquidTransaction:ApproveBuilderFee',
-              message: builderEip712Message,
+              message: {
+                hyperliquidChain: 'Mainnet',
+                maxFeeRate: BUILDER_MAX_FEE_RATE,
+                builder: BUILDER_ADDRESS.toLowerCase(),
+                nonce: builderNonce,
+              },
             };
 
             console.log('[MiniApp] Signing builder fee approval:', JSON.stringify(builderTypedData, null, 2));
@@ -503,8 +505,6 @@ export default function Home() {
                 walletAddress: embeddedWallet.address,
                 signature: builderSignature,
                 nonce: builderNonce,
-                domainChainId,
-                signatureChainId,
               }),
             });
 
@@ -514,67 +514,34 @@ export default function Home() {
               status: proxyResponse.status,
               ok: proxyResponse.ok,
               response: proxyResult,
-              domainChainId,
-              signatureChainId,
             });
 
-            return { proxyResponse, proxyResult, domainChainId, signatureChainId };
+            return { proxyResponse, proxyResult };
           };
 
-          const primaryAttempt = await attemptApproval(42161, '0xa4b1');
-          let finalAttempt = primaryAttempt;
+          const attempt = await attemptApproval();
 
           const errorMsg =
-            primaryAttempt.proxyResult?.response?.response ||
-            primaryAttempt.proxyResult?.error ||
-            'Builder fee approval failed';
-          
-          // More flexible regex to match various error formats
-          const mismatchAddressMatch =
-            typeof errorMsg === 'string' 
-              ? errorMsg.match(/User[:\s]+(0x[a-fA-F0-9]{40})/i) || 
-                errorMsg.match(/(0x[a-fA-F0-9]{40})/i)
-              : null;
-          const mismatchAddress = mismatchAddressMatch?.[1];
-          
-          console.log('[MiniApp] Error message:', errorMsg);
-          console.log('[MiniApp] Mismatch address match:', mismatchAddressMatch);
-          console.log('[MiniApp] Mismatch address:', mismatchAddress);
-
-          if (
-            !(primaryAttempt.proxyResponse.ok && primaryAttempt.proxyResult?.response?.status === 'ok') &&
-            mismatchAddress &&
-            mismatchAddress.toLowerCase() !== embeddedWallet.address.toLowerCase()
-          ) {
-            await logClientEvent('builder_fee', 'retry_with_alt_chain', {
-              mismatchAddress,
-              walletAddress: embeddedWallet.address,
-            });
-            finalAttempt = await attemptApproval(421614, '0x66eee');
-          }
-
-          const finalErrorMsg =
-            finalAttempt.proxyResult?.response?.response ||
-            finalAttempt.proxyResult?.error ||
+            attempt.proxyResult?.response?.response ||
+            attempt.proxyResult?.error ||
             'Builder fee approval failed';
 
-          if (finalAttempt.proxyResponse.ok && finalAttempt.proxyResult?.response?.status === 'ok') {
+          if (attempt.proxyResponse.ok && attempt.proxyResult?.response?.status === 'ok') {
             console.log('[Hyperliquid] Builder fee approved successfully');
             setBuilderFeeStatus('approved');
           } else {
-            console.error('[Hyperliquid] Builder fee approval failed:', finalErrorMsg);
+            console.error('[Hyperliquid] Builder fee approval failed:', errorMsg);
             setBuilderFeeStatus('failed');
-            setBuilderFeeError(finalErrorMsg);
-            if (typeof finalErrorMsg === 'string' && finalErrorMsg.includes('Must deposit before performing actions')) {
-              // More flexible regex to match various error formats
-              const match = finalErrorMsg.match(/User[:\s]+(0x[a-fA-F0-9]{40})/i) || 
-                           finalErrorMsg.match(/(0x[a-fA-F0-9]{40})/i);
+            setBuilderFeeError(errorMsg);
+            if (typeof errorMsg === 'string' && errorMsg.includes('Must deposit before performing actions')) {
+              const match = errorMsg.match(/User[:\s]+(0x[a-fA-F0-9]{40})/i) || 
+                           errorMsg.match(/(0x[a-fA-F0-9]{40})/i);
               const addressForDeposit = match?.[1] || embeddedWallet.address;
               setDepositWarning(
                 `Deposit USDC to ${addressForDeposit} on Hyperliquid, then run /approval to enable trading.`
               );
             }
-            await logClientEvent('builder_fee', 'approval failed', { error: finalErrorMsg });
+            await logClientEvent('builder_fee', 'approval failed', { error: errorMsg });
           }
         } catch (builderError) {
           const message = builderError instanceof Error ? builderError.message : String(builderError);
