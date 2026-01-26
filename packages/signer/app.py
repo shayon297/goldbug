@@ -12,9 +12,9 @@ API_URL = os.getenv("HYPERLIQUID_API_URL", "https://api.hyperliquid.xyz")
 TRADING_ASSET = os.getenv("TRADING_ASSET", "xyz:GOLD")
 SIGNER_API_KEY = os.getenv("SIGNER_API_KEY")
 
-# Builder fee configuration - fee in tenths of basis points (100 = 10bp = 0.1%)
+# Builder fee configuration - fee in tenths of basis points (1000 = 100bp = 1%)
 BUILDER_ADDRESS = os.getenv("BUILDER_ADDRESS", "")
-BUILDER_FEE_BPS = int(os.getenv("BUILDER_FEE_BPS", "100"))
+BUILDER_FEE_BPS = int(os.getenv("BUILDER_FEE_BPS", "1000"))
 
 
 def parse_dex(asset: str) -> Optional[str]:

@@ -16,7 +16,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 // Builder fee configuration - address that receives trading fees
 const BUILDER_ADDRESS = process.env.NEXT_PUBLIC_BUILDER_ADDRESS || '';
-const BUILDER_MAX_FEE_RATE = '0.1%'; // Maximum 0.1% (10 bps)
+const BUILDER_MAX_FEE_RATE = '1%'; // Maximum 1% (100 bps)
 
 // Arbitrum USDC and Hyperliquid Bridge
 const ARBITRUM_RPC = 'https://arb1.arbitrum.io/rpc';

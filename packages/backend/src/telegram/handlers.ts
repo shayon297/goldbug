@@ -14,7 +14,6 @@ import {
   settingsKeyboard,
   ordersKeyboard,
   closeConfirmKeyboard,
-  approveBuilderFeeKeyboard,
   authorizeAgentKeyboard,
 } from './keyboards.js';
 import { parseTradeCommand, parseCloseCommand, formatTradeCommand, sanitizeInput } from './parser.js';
@@ -30,8 +29,6 @@ import {
 import { getHyperliquidClient, TRADING_ASSET } from '../hyperliquid/client.js';
 
 const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
-const BUILDER_ADDRESS = process.env.BUILDER_ADDRESS || '';
-const BUILDER_MAX_FEE_RATE = process.env.BUILDER_MAX_FEE_RATE || '0.1%';
 /**
  * Check if user has existing position with different leverage (for warning)
  */
@@ -830,33 +827,8 @@ export function registerHandlers(bot: Telegraf) {
     try {
       const hl = await getHyperliquidClient();
 
-      // Check builder fee approval if builder address is configured
-      if (BUILDER_ADDRESS && BUILDER_ADDRESS !== '0x...your_builder_wallet_address' && BUILDER_ADDRESS !== 'DISABLED') {
-        const isApproved = await hl.isBuilderFeeApproved(user.walletAddress, BUILDER_ADDRESS);
-        if (!isApproved) {
-          // Store pending order for auto-retry after approval
-          await updateSession(telegramId, {
-            ...session,
-            step: 'idle',
-            pendingOrder: {
-              side: session.side!,
-              sizeUsd: session.sizeUsd!,
-              leverage: session.leverage!,
-              orderType: session.orderType!,
-              limitPrice: session.limitPrice,
-            },
-          });
-
-          await ctx.editMessageText(
-            `🔒 *Builder Fee Approval Required*\n\n` +
-              `Your account has not approved the builder fee yet.\n` +
-              `Tap below to approve it, then your order will execute automatically.\n\n` +
-              `_This is required to route trades through the bot._`,
-            { parse_mode: 'Markdown', ...approveBuilderFeeKeyboard(MINIAPP_URL) }
-          );
-          return;
-        }
-      }
+      // Builder fee approval is done during onboarding (combined with agent auth)
+      // If not approved, Hyperliquid will return an error during order placement
 
       const result = await hl.placeOrder(user.agentPrivateKey, user.walletAddress, {
         side: session.side,
@@ -916,6 +888,15 @@ export function registerHandlers(bot: Telegraf) {
             `_Your order will execute automatically after authorization._`,
             { parse_mode: 'Markdown', ...authorizeAgentKeyboard(MINIAPP_URL) }
           );
+        } else if (errorMsg.toLowerCase().includes('builder fee')) {
+          // Builder fee not approved - guide user to re-approve
+          await ctx.editMessageText(
+            `🔒 *Builder Fee Required*\n\n` +
+            `Trading requires builder fee approval.\n` +
+            `Please tap below to complete setup.\n\n` +
+            `_This is a one-time approval._`,
+            { parse_mode: 'Markdown', ...authorizeAgentKeyboard(MINIAPP_URL) }
+          );
         } else {
           await ctx.editMessageText(`❌ Order failed: ${errorMsg}`, mainMenuKeyboard());
         }
@@ -943,6 +924,15 @@ export function registerHandlers(bot: Telegraf) {
           `Your wallet has funds but trading isn't enabled yet.\n` +
           `Tap below to authorize trading.\n\n` +
           `_Your order will execute automatically after authorization._`,
+          { parse_mode: 'Markdown', ...authorizeAgentKeyboard(MINIAPP_URL) }
+        );
+      } else if (message.toLowerCase().includes('builder fee')) {
+        // Builder fee not approved - guide user to re-approve
+        await ctx.editMessageText(
+          `🔒 *Builder Fee Required*\n\n` +
+          `Trading requires builder fee approval.\n` +
+          `Please tap below to complete setup.\n\n` +
+          `_This is a one-time approval._`,
           { parse_mode: 'Markdown', ...authorizeAgentKeyboard(MINIAPP_URL) }
         );
       } else {
