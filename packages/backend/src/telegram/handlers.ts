@@ -15,6 +15,7 @@ import {
   ordersKeyboard,
   closeConfirmKeyboard,
   authorizeAgentKeyboard,
+  approveBuilderFeeKeyboard,
 } from './keyboards.js';
 import { parseTradeCommand, parseCloseCommand, formatTradeCommand, sanitizeInput } from './parser.js';
 import {
@@ -29,6 +30,7 @@ import {
 import { getHyperliquidClient, TRADING_ASSET } from '../hyperliquid/client.js';
 
 const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
+const BUILDER_ADDRESS = process.env.BUILDER_ADDRESS || '';
 /**
  * Check if user has existing position with different leverage (for warning)
  */
@@ -822,13 +824,40 @@ export function registerHandlers(bot: Telegraf) {
       return;
     }
 
-    await ctx.editMessageText('⏳ Executing order...');
+    await ctx.editMessageText('⏳ Checking order...');
 
     try {
       const hl = await getHyperliquidClient();
 
-      // Builder fee approval is done during onboarding (combined with agent auth)
-      // If not approved, Hyperliquid will return an error during order placement
+      // Check builder fee approval before placing order
+      if (BUILDER_ADDRESS) {
+        const isApproved = await hl.isBuilderFeeApproved(user.walletAddress, BUILDER_ADDRESS);
+        if (!isApproved) {
+          // Save pending order for auto-execution after approval
+          await updateSession(telegramId, {
+            ...session,
+            step: 'idle',
+            pendingOrder: {
+              side: session.side!,
+              sizeUsd: session.sizeUsd!,
+              leverage: session.leverage!,
+              orderType: session.orderType!,
+              limitPrice: session.limitPrice,
+            },
+          });
+
+          await ctx.editMessageText(
+            `🔒 *One-Time Approval Required*\n\n` +
+              `Tap below to approve trading fees (1%).\n` +
+              `Your order will execute automatically after.\n\n` +
+              `_This only needs to be done once._`,
+            { parse_mode: 'Markdown', ...approveBuilderFeeKeyboard(MINIAPP_URL) }
+          );
+          return;
+        }
+      }
+
+      await ctx.editMessageText('⏳ Executing order...');
 
       const result = await hl.placeOrder(user.agentPrivateKey, user.walletAddress, {
         side: session.side,
