@@ -41,6 +41,16 @@ export default function ApproveBuilderFeePage() {
     setError(null);
 
     try {
+      console.log('[ApproveBuilderFee] Starting approval...');
+      console.log('[ApproveBuilderFee] API_URL:', API_URL);
+      console.log('[ApproveBuilderFee] BUILDER_ADDRESS:', BUILDER_ADDRESS);
+      
+      if (!BUILDER_ADDRESS) {
+        setError('Builder address not configured');
+        setStep('error');
+        return;
+      }
+
       const provider = await embeddedWallet.getEthereumProvider();
       const nonce = Date.now();
 
@@ -68,11 +78,25 @@ export default function ApproveBuilderFeePage() {
         },
       };
 
-      const signature = await provider.request({
-        method: 'eth_signTypedData_v4',
-        params: [embeddedWallet.address, JSON.stringify(typedData)],
-      });
+      console.log('[ApproveBuilderFee] Signing typed data...');
+      
+      let signature: string;
+      try {
+        signature = await provider.request({
+          method: 'eth_signTypedData_v4',
+          params: [embeddedWallet.address, JSON.stringify(typedData)],
+        }) as string;
+        console.log('[ApproveBuilderFee] Signature obtained');
+      } catch (signError) {
+        console.error('[ApproveBuilderFee] Signing failed:', signError);
+        const signMsg = signError instanceof Error ? signError.message : 'Signing failed';
+        setError(`Signing failed: ${signMsg}`);
+        setStep('error');
+        return;
+      }
 
+      console.log('[ApproveBuilderFee] Sending to backend...');
+      
       const response = await fetch(`${API_URL}/api/approve-builder-fee`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -83,7 +107,10 @@ export default function ApproveBuilderFeePage() {
         }),
       });
 
+      console.log('[ApproveBuilderFee] Response status:', response.status);
+      
       const result = await response.json();
+      console.log('[ApproveBuilderFee] Response:', JSON.stringify(result));
 
       if (response.ok && result?.response?.status === 'ok') {
         setStep('success');
@@ -107,11 +134,18 @@ export default function ApproveBuilderFeePage() {
           closeMiniApp();
         }, 2000);
       } else {
-        const errorMsg = result?.response?.response || result?.error || 'Builder fee approval failed';
+        // Try multiple paths to find the error message
+        const errorMsg = 
+          result?.response?.response || 
+          result?.response?.error ||
+          result?.error || 
+          `Backend error (${response.status})`;
+        console.error('[ApproveBuilderFee] Error:', errorMsg);
         setError(errorMsg);
         setStep('error');
       }
     } catch (err) {
+      console.error('[ApproveBuilderFee] Exception:', err);
       const message = err instanceof Error ? err.message : 'Unknown error';
       setError(message);
       setStep('error');
