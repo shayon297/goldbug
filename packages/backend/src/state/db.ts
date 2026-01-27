@@ -22,6 +22,7 @@ export interface UserWithDecryptedKey {
   agentPrivateKey: string;
   defaultLeverage: number;
   defaultSizeUsd: number;
+  points: number;
 }
 
 /**
@@ -82,6 +83,7 @@ export async function getUserByTelegramId(telegramId: bigint): Promise<UserWithD
     agentPrivateKey: keyWithPrefix, // Always return with 0x prefix
     defaultLeverage: user.defaultLeverage,
     defaultSizeUsd: user.defaultSizeUsd,
+    points: user.points,
   };
 }
 
@@ -106,6 +108,43 @@ export async function updateUserPreferences(
     where: { telegramId },
     data: preferences,
   });
+}
+
+/**
+ * Points system for rewards
+ */
+
+// Points awarded for different actions
+export const POINTS_CONFIG = {
+  SHARE_TRADE: 10,      // Sharing a trade receipt
+  REFERRAL_SIGNUP: 50,  // When someone you referred signs up
+  REFERRAL_TRADE: 5,    // When someone you referred makes a trade (future)
+} as const;
+
+/**
+ * Add points to a user's account
+ * Returns the new total points
+ */
+export async function addPoints(telegramId: bigint, points: number): Promise<number> {
+  const user = await prisma.user.update({
+    where: { telegramId },
+    data: {
+      points: { increment: points },
+    },
+    select: { points: true },
+  });
+  return user.points;
+}
+
+/**
+ * Get user's current points
+ */
+export async function getPoints(telegramId: bigint): Promise<number> {
+  const user = await prisma.user.findUnique({
+    where: { telegramId },
+    select: { points: true },
+  });
+  return user?.points ?? 0;
 }
 
 export async function getAllUsers(): Promise<Array<{ telegramId: bigint; walletAddress: string }>> {

@@ -3,22 +3,17 @@ import { registerHandlers } from './handlers.js';
 import { TRADING_ASSET } from '../hyperliquid/client.js';
 
 /**
- * Bot command menu items
+ * Bot command menu items (consolidated to 8 core commands)
  */
 const BOT_COMMANDS = [
-  { command: 'start', description: 'Show main menu & account status' },
-  { command: 'long', description: `Open a LONG position on ${TRADING_ASSET}` },
-  { command: 'short', description: `Open a SHORT position on ${TRADING_ASSET}` },
-  { command: 'position', description: 'View your current position' },
-  { command: 'orders', description: 'View open orders' },
-  { command: 'fills', description: 'View recent fills' },
-  { command: 'balance', description: 'Check account balance' },
-  { command: 'bridge', description: '🌉 Bridge USDC to Hyperliquid' },
-  { command: 'onramp', description: '💳 Buy USDC (Arbitrum)' },
-  { command: 'deposit', description: 'How to fund your wallet' },
+  { command: 'start', description: 'Main menu & account status' },
+  { command: 'long', description: `Open a LONG position` },
+  { command: 'short', description: `Open a SHORT position` },
+  { command: 'status', description: 'Balance, position & orders' },
   { command: 'close', description: 'Close your position' },
-  { command: 'cancel', description: 'Cancel all open orders' },
-  { command: 'help', description: 'Show help & commands' },
+  { command: 'fund', description: '💳 Add funds (bridge or buy)' },
+  { command: 'price', description: `Current ${TRADING_ASSET} price` },
+  { command: 'help', description: 'Commands & examples' },
 ];
 
 /**

@@ -16,6 +16,7 @@ model User {
   agentKeyEncrypted String   // AES-256-GCM encrypted private key
   defaultLeverage   Int      @default(1)
   defaultSizeUsd    Float    @default(100)
+  points            Int      @default(0) // Reward points for sharing, referrals, etc.
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

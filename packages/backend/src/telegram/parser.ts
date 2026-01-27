@@ -168,13 +168,29 @@ export function parseTradeCommand(text: string): ParseResult {
 
 /**
  * Format a trade command for display
+ * @param cmd - The trade command
+ * @param currentPrice - Optional current price to show
+ * @param balance - Optional available balance to show
  */
-export function formatTradeCommand(cmd: TradeCommand): string {
+export function formatTradeCommand(cmd: TradeCommand, currentPrice?: number, balance?: number): string {
   const sideEmoji = cmd.side === 'long' ? '📈' : '📉';
   const sideText = cmd.side.toUpperCase();
-  const typeText = cmd.orderType === 'market' ? 'Market' : `Limit @ $${cmd.limitPrice}`;
+  const typeText = cmd.orderType === 'market' ? 'Market' : `Limit @ $${cmd.limitPrice?.toLocaleString()}`;
 
-  return `${sideEmoji} ${sideText} ${TRADING_ASSET}\n💰 Size: $${cmd.sizeUsd}\n📊 Leverage: ${cmd.leverage}x\n⚡ Type: ${typeText}`;
+  let output = `${sideEmoji} *${sideText}* ${TRADING_ASSET}\n`;
+  output += `💵 Size: $${cmd.sizeUsd.toLocaleString()}\n`;
+  output += `📊 Leverage: ${cmd.leverage}x\n`;
+  output += `⚡ Type: ${typeText}`;
+  
+  if (currentPrice) {
+    output += `\n💲 Current Price: $${currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  
+  if (balance !== undefined) {
+    output += `\n💰 Available: $${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  return output;
 }
 
 /**
@@ -215,5 +231,162 @@ export function sanitizeInput(text: string): string {
     .replace(/[<>{}[\]\\]/g, '')
     .trim()
     .slice(0, 200); // Max 200 chars
+}
+
+/**
+ * Deep link payload format for shareable trades
+ * Format: trade_{side}_{sizeUsd}_{leverage}_{type}_{timestamp}[_ref_{code}]
+ * 
+ * Side: L (long) or S (short)
+ * Type: M (market) or L (limit)
+ * Timestamp: Unix seconds (for expiry check)
+ * 
+ * Examples:
+ * - trade_L_100_5_M_1706300000 = Long $100 5x Market
+ * - trade_S_500_10_M_1706300000_ref_abc123 = Short $500 10x with referral
+ */
+
+export interface DeepLinkPayload {
+  type: 'trade' | 'ref' | 'unknown';
+  trade?: {
+    side: 'long' | 'short';
+    sizeUsd: number;
+    leverage: number;
+    orderType: 'market' | 'limit';
+    timestamp: number;
+    referralCode?: string;
+  };
+  referralCode?: string;
+  error?: string;
+}
+
+// Deep links expire after 60 minutes
+const DEEP_LINK_EXPIRY_SECONDS = 60 * 60;
+
+/**
+ * Parse a deep link payload from /start command
+ * Returns structured data or error
+ */
+export function parseDeepLink(payload: string): DeepLinkPayload {
+  if (!payload || payload.trim() === '') {
+    return { type: 'unknown' };
+  }
+
+  const parts = payload.split('_');
+
+  // Check for referral-only link: ref_CODE
+  if (parts[0] === 'ref' && parts.length >= 2) {
+    return {
+      type: 'ref',
+      referralCode: parts[1],
+    };
+  }
+
+  // Check for trade link: trade_L_100_5_M_TIMESTAMP[_ref_CODE]
+  if (parts[0] === 'trade' && parts.length >= 6) {
+    const sideCode = parts[1];
+    const sizeUsd = parseInt(parts[2], 10);
+    const leverage = parseInt(parts[3], 10);
+    const typeCode = parts[4];
+    const timestamp = parseInt(parts[5], 10);
+
+    // Validate side
+    const side = sideCode === 'L' ? 'long' : sideCode === 'S' ? 'short' : null;
+    if (!side) {
+      return { type: 'unknown', error: 'Invalid trade side' };
+    }
+
+    // Validate size
+    if (isNaN(sizeUsd) || sizeUsd < 10 || sizeUsd > 100000) {
+      return { type: 'unknown', error: 'Invalid trade size' };
+    }
+
+    // Validate leverage
+    if (isNaN(leverage) || leverage < 1 || leverage > 20) {
+      return { type: 'unknown', error: 'Invalid leverage' };
+    }
+
+    // Validate order type
+    const orderType = typeCode === 'M' ? 'market' : typeCode === 'L' ? 'limit' : null;
+    if (!orderType) {
+      return { type: 'unknown', error: 'Invalid order type' };
+    }
+
+    // Check expiry (60 minutes)
+    const now = Math.floor(Date.now() / 1000);
+    if (isNaN(timestamp) || now - timestamp > DEEP_LINK_EXPIRY_SECONDS) {
+      return { type: 'unknown', error: 'This trade link has expired' };
+    }
+
+    // Check for referral code
+    let referralCode: string | undefined;
+    const refIndex = parts.indexOf('ref');
+    if (refIndex !== -1 && parts.length > refIndex + 1) {
+      referralCode = parts[refIndex + 1];
+    }
+
+    return {
+      type: 'trade',
+      trade: {
+        side,
+        sizeUsd,
+        leverage,
+        orderType,
+        timestamp,
+        referralCode,
+      },
+    };
+  }
+
+  return { type: 'unknown' };
+}
+
+/**
+ * Generate a deep link payload for a trade
+ * Format: trade_{side}_{sizeUsd}_{leverage}_{type}_{timestamp}
+ */
+export function generateTradeDeepLink(
+  side: 'long' | 'short',
+  sizeUsd: number,
+  leverage: number,
+  orderType: 'market' | 'limit' = 'market',
+  referralCode?: string
+): string {
+  const sideCode = side === 'long' ? 'L' : 'S';
+  const typeCode = orderType === 'market' ? 'M' : 'L';
+  const timestamp = Math.floor(Date.now() / 1000);
+
+  let payload = `trade_${sideCode}_${sizeUsd}_${leverage}_${typeCode}_${timestamp}`;
+  
+  if (referralCode) {
+    payload += `_ref_${referralCode}`;
+  }
+
+  return payload;
+}
+
+/**
+ * Format a trade receipt for sharing
+ * Returns a nicely formatted message with the deep link
+ */
+export function formatTradeReceipt(
+  side: 'long' | 'short',
+  sizeUsd: number,
+  leverage: number,
+  entryPrice: number,
+  botUsername: string,
+  referralCode?: string
+): string {
+  const sideEmoji = side === 'long' ? '📈' : '📉';
+  const sideText = side.toUpperCase();
+  const deepLink = generateTradeDeepLink(side, sizeUsd, leverage, 'market', referralCode);
+  const link = `https://t.me/${botUsername}?start=${deepLink}`;
+
+  return (
+    `${sideEmoji} *${sideText}* ${TRADING_ASSET} @ ${leverage}x\n\n` +
+    `💵 Size: $${sizeUsd.toLocaleString()}\n` +
+    `💲 Entry: $${entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n` +
+    `👉 Copy this trade:\n${link}`
+  );
 }
 

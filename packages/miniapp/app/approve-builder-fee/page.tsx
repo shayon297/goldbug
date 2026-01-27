@@ -6,7 +6,7 @@ import { expandMiniApp, getTelegramUser, closeMiniApp } from '@/lib/telegram';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 const BUILDER_ADDRESS = process.env.NEXT_PUBLIC_BUILDER_ADDRESS || '';
-const BUILDER_MAX_FEE_RATE = '1%'; // Maximum builder fee rate (1% = 100 bps)
+const BUILDER_MAX_FEE_RATE = '0.1%'; // Maximum builder fee rate for perps
 
 export default function ApproveBuilderFeePage() {
   const privy = usePrivy();
@@ -132,10 +132,10 @@ export default function ApproveBuilderFeePage() {
           }
         }
 
-        // Close Mini App after 2 seconds
+        // Close Mini App after 1.5 seconds for snappier feel
         setTimeout(() => {
           closeMiniApp();
-        }, 2000);
+        }, 1500);
       } else {
         // Try multiple paths to find the error message
         const errorMsg = 
@@ -174,11 +174,11 @@ export default function ApproveBuilderFeePage() {
         {step === 'init' && (
           <div className="text-center">
             <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-3xl">💸</span>
+              <span className="text-3xl">✅</span>
             </div>
-            <h1 className="text-2xl font-bold mb-2">Approve Builder Fee</h1>
+            <h1 className="text-2xl font-bold mb-2">One-Time Setup</h1>
             <p className="text-zinc-400 mb-6">
-              Approve the builder fee to enable trading. This is a one-time action.
+              Approve trading fees (0.1% per trade) to start trading.
             </p>
             {embeddedWallet && (
               <div className="bg-zinc-800/50 rounded-lg p-3 mb-6 text-left">
@@ -190,7 +190,7 @@ export default function ApproveBuilderFeePage() {
               onClick={handleApprove}
               className="w-full bg-gold-500 hover:bg-gold-600 text-black font-semibold py-3 px-6 rounded-lg transition"
             >
-              Approve Builder Fee
+              Approve & Continue
             </button>
           </div>
         )}
@@ -204,13 +204,14 @@ export default function ApproveBuilderFeePage() {
 
         {step === 'success' && (
           <div className="text-center">
-            <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
               <svg className="w-8 h-8 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
             <h2 className="text-xl font-semibold mb-2 text-green-500">Approved!</h2>
-            <p className="text-zinc-400">Your order will execute automatically...</p>
+            <p className="text-zinc-400 mb-2">Your order will execute automatically.</p>
+            <p className="text-zinc-500 text-sm">Returning to Telegram...</p>
           </div>
         )}
 

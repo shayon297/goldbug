@@ -57,18 +57,19 @@ export function dashboardKeyboard(hasPosition: boolean, miniAppUrl: string) {
   ]);
 }
 
-// Size selection
+// Size selection (4 common sizes + custom)
 export function sizeSelectionKeyboard() {
   return Markup.inlineKeyboard([
     [
+      Markup.button.callback('$25', 'size:25'),
+      Markup.button.callback('$50', 'size:50'),
       Markup.button.callback('$100', 'size:100'),
       Markup.button.callback('$250', 'size:250'),
-      Markup.button.callback('$500', 'size:500'),
     ],
     [
+      Markup.button.callback('$500', 'size:500'),
       Markup.button.callback('$1000', 'size:1000'),
-      Markup.button.callback('$2500', 'size:2500'),
-      Markup.button.callback('Custom', 'size:custom'),
+      Markup.button.callback('✏️ Custom', 'size:custom'),
     ],
     [Markup.button.callback('❌ Cancel', 'action:cancel')],
   ]);
@@ -195,7 +196,7 @@ export function approveBuilderFeeKeyboard(miniAppUrl: string) {
   const cacheBuster = Date.now();
   const approvalUrl = `${miniAppUrl.replace(/\/$/, '')}/approve-builder-fee?v=${cacheBuster}`;
   return Markup.inlineKeyboard([
-    [Markup.button.webApp('💸 Approve Builder Fee', approvalUrl)],
+    [Markup.button.webApp('✅ Approve & Trade', approvalUrl)],
     [Markup.button.callback('❌ Cancel', 'confirm:no')],
   ]);
 }
@@ -207,6 +208,48 @@ export function authorizeAgentKeyboard(miniAppUrl: string) {
   return Markup.inlineKeyboard([
     [Markup.button.webApp('✅ Authorize Trading', approvalUrl)],
     [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+
+/**
+ * Trade receipt keyboard shown after a trade fills
+ * Includes share and copy buttons for viral distribution
+ */
+export interface TradeReceiptParams {
+  side: 'long' | 'short';
+  sizeUsd: number;
+  leverage: number;
+  entryPrice: number;
+}
+
+export function tradeReceiptKeyboard(params: TradeReceiptParams) {
+  // Encode trade params in callback data for share action
+  const shareData = `share:${params.side === 'long' ? 'L' : 'S'}_${params.sizeUsd}_${params.leverage}_${Math.round(params.entryPrice)}`;
+  const copyData = `copy:${params.side === 'long' ? 'L' : 'S'}_${params.sizeUsd}_${params.leverage}`;
+  
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('📤 Share Trade', shareData),
+      Markup.button.callback('🔄 Copy Setup', copyData),
+    ],
+    [
+      Markup.button.callback('📊 View Position', 'action:position'),
+      Markup.button.callback('🔴 Close', 'action:close'),
+    ],
+    [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+
+/**
+ * Keyboard shown after user copies a shared trade
+ * Simpler - just confirm or cancel
+ */
+export function copiedTradeKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('✅ Execute Trade', 'confirm:yes'),
+      Markup.button.callback('❌ Cancel', 'confirm:no'),
+    ],
   ]);
 }
 
