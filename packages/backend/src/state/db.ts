@@ -157,6 +157,24 @@ export async function getAllUsers(): Promise<Array<{ telegramId: bigint; walletA
 }
 
 /**
+ * Get leaderboard data - users with their points
+ */
+export async function getLeaderboard(limit: number = 50): Promise<Array<{
+  walletAddress: string;
+  points: number;
+}>> {
+  const users = await prisma.user.findMany({
+    select: {
+      walletAddress: true,
+      points: true,
+    },
+    orderBy: { points: 'desc' },
+    take: limit,
+  });
+  return users;
+}
+
+/**
  * Session management for order flow state
  */
 export interface OrderContext {

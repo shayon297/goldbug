@@ -8,6 +8,8 @@
   "scripts": {
     "dev:backend": "npm run dev --workspace=@goldbug/backend",
     "dev:miniapp": "npm run dev --workspace=@goldbug/miniapp",
+    "dev:website": "npm run dev --workspace=@goldbug/website",
+    "dev:analytics": "npm run dev --workspace=@goldbug/analytics",
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present"

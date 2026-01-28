@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -17,7 +17,6 @@ body {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Telegram Mini App viewport fix */
 html, body {
   min-height: 100vh;
   min-height: 100dvh;
@@ -50,75 +49,30 @@ html, body {
   background: radial-gradient(circle, var(--tw-gradient-stops));
 }
 
-/* Button styles */
-.btn-gold {
-  @apply bg-gradient-to-r from-gold-500 to-gold-600 text-black font-semibold py-3 px-6 rounded-lg;
-  @apply hover:from-gold-400 hover:to-gold-500 transition-all duration-200;
-  @apply disabled:opacity-50 disabled:cursor-not-allowed;
-}
-
-.btn-outline {
-  @apply border border-gold-500 text-gold-500 font-semibold py-3 px-6 rounded-lg;
-  @apply hover:bg-gold-500/10 transition-all duration-200;
-}
-
-/* Card style */
-.card {
-  @apply bg-zinc-900/80 border border-zinc-800 rounded-xl p-6;
-  @apply backdrop-blur-sm;
-}
-
-/* Loading spinner */
-.spinner {
-  @apply w-6 h-6 border-2 border-gold-500/30 border-t-gold-500 rounded-full animate-spin;
-}
-
-/* Landing page animations */
+/* Animations */
 @keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes fade-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes float {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
 }
 
 @keyframes pulse-slow {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.6;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 @keyframes pulse-slower {
-  0%, 100% {
-    opacity: 0.8;
-  }
-  50% {
-    opacity: 0.4;
-  }
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 0.4; }
 }
 
 .animate-fade-in {

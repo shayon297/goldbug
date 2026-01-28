@@ -36,3 +36,15 @@ model Session {
   @@index([expiresAt])
 }
 
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  telegramId  BigInt?
+  eventType   String   // signup, login, onramp_started, onramp_completed, first_trade, etc.
+  metadata    String?  // JSON metadata
+  createdAt   DateTime @default(now())
+
+  @@index([eventType])
+  @@index([createdAt])
+  @@index([telegramId])
+}
+

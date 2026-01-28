@@ -16,6 +16,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 // Builder fee configuration - address that receives trading fees
 const BUILDER_ADDRESS = process.env.NEXT_PUBLIC_BUILDER_ADDRESS || '';
+
+// Onramper widget configuration
+const ONRAMPER_API_KEY = process.env.NEXT_PUBLIC_ONRAMPER_API_KEY || '';
 const BUILDER_MAX_FEE_RATE = '0.1%'; // Maximum 0.1% for perps (10 bps)
 
 // Arbitrum USDC and Hyperliquid Bridge
@@ -31,7 +34,7 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)',
 ];
 
-type Step = 'init' | 'login' | 'authorize' | 'registering' | 'success' | 'bridge' | 'bridging' | 'bridged' | 'onramp' | 'error';
+type Step = 'init' | 'login' | 'authorize' | 'registering' | 'success' | 'bridge' | 'bridging' | 'bridged' | 'onramp' | 'offramp' | 'error';
 
 export default function Home() {
   const privy = usePrivy();
@@ -54,6 +57,7 @@ export default function Home() {
   const [wantsApproval, setWantsApproval] = useState(false);
   const [wantsBuilderFeeOnly, setWantsBuilderFeeOnly] = useState(false);
   const [wantsOnramp, setWantsOnramp] = useState(false);
+  const [wantsOfframp, setWantsOfframp] = useState(false);
   const [wantsFunding, setWantsFunding] = useState(false);
   const [fundingAddress, setFundingAddress] = useState<string | null>(null);
   const checkedUrl = useRef(false);
@@ -116,6 +120,9 @@ export default function Home() {
       } else if (action === 'onramp') {
         console.log('[MiniApp] Onramp action detected');
         setWantsOnramp(true);
+      } else if (action === 'offramp') {
+        console.log('[MiniApp] Offramp action detected');
+        setWantsOfframp(true);
       } else if (action === 'funding') {
         // Opened in external browser for funding
         console.log('[MiniApp] Funding action detected (external browser)');
@@ -145,7 +152,7 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     // Don't reset these steps - they should persist until user action
-    if (step === 'bridge' || step === 'bridging' || step === 'bridged' || step === 'onramp' ||
+    if (step === 'bridge' || step === 'bridging' || step === 'bridged' || step === 'onramp' || step === 'offramp' ||
         step === 'registering' || step === 'error' || step === 'success') return;
 
     if (authenticated && wallets.length > 0) {
@@ -160,6 +167,9 @@ export default function Home() {
       } else if (wantsOnramp) {
         console.log('[MiniApp] Going to onramp step');
         setStep('onramp');
+      } else if (wantsOfframp) {
+        console.log('[MiniApp] Going to offramp step');
+        setStep('offramp');
       } else if (wantsApproval || wantsBuilderFeeOnly) {
         console.log('[MiniApp] Going to authorize step for approval');
         setStep('authorize');
@@ -170,7 +180,7 @@ export default function Home() {
       // Go to login for any action
       setStep('login');
     }
-  }, [ready, authenticated, wallets, wantsBridge, wantsApproval, wantsBuilderFeeOnly, wantsOnramp, wantsFunding, step]);
+  }, [ready, authenticated, wallets, wantsBridge, wantsApproval, wantsBuilderFeeOnly, wantsOnramp, wantsOfframp, wantsFunding, step]);
 
   // Auto-trigger funding when opened in external browser with funding action
   useEffect(() => {
@@ -664,6 +674,30 @@ export default function Home() {
     setStep('bridge');
   }, [fetchBalances]);
 
+  // Generate Onramper widget URL
+  const getOnramperUrl = useCallback((mode: 'buy' | 'sell') => {
+    const embeddedWallet = wallets.find((w) => w.walletClientType === 'privy');
+    const walletAddress = embeddedWallet?.address || wallets[0]?.address || '';
+    
+    const params = new URLSearchParams({
+      apiKey: ONRAMPER_API_KEY,
+      mode: mode,
+      defaultCrypto: 'usdc_arbitrum',
+      onlyCryptos: 'usdc_arbitrum',
+      networkWallets: `arbitrum:${walletAddress}`,
+      themeName: 'dark',
+      containerColor: '18181bff', // zinc-900
+      primaryColor: 'f59e0bff', // amber-500
+      secondaryColor: '3f3f46ff', // zinc-700
+      cardColor: '27272aff', // zinc-800
+      primaryTextColor: 'faboraff', // white
+      secondaryTextColor: 'a1a1aaff', // zinc-400
+      borderRadius: '0.75', // rounded-lg
+    });
+
+    return `https://buy.onramper.com/?${params.toString()}`;
+  }, [wallets]);
+
   // Handle bridge execution - tries gas sponsorship, falls back to gas drip
   const handleBridge = useCallback(async () => {
     if (!bridgeAmount || wallets.length === 0) return;
@@ -996,20 +1030,32 @@ export default function Home() {
               </div>
             )}
 
-            {/* Onramp Selector */}
+            {/* Funding Options */}
             <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4 mb-4 text-left">
-              <p className="text-zinc-200 font-semibold text-sm mb-2">💳 Add Funds (USDC on Arbitrum)</p>
-              <p className="text-xs text-zinc-400 mb-3">
-                Buy USDC with MoonPay. KYC may be required.
-              </p>
-
-              <button
-                onClick={handleMoonPayFunding}
-                className="w-full block bg-blue-600 hover:bg-blue-500 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition"
-              >
-                💳 Buy USDC with MoonPay
-              </button>
-              <p className="text-xs text-zinc-500 mt-1">Opens in external browser</p>
+              <p className="text-zinc-200 font-semibold text-sm mb-3">💰 Fund Your Account</p>
+              
+              <div className="space-y-2">
+                <button
+                  onClick={() => setStep('onramp')}
+                  className="w-full bg-green-600 hover:bg-green-500 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition flex items-center justify-center gap-2"
+                >
+                  💳 Buy USDC
+                </button>
+                
+                <button
+                  onClick={handleBridgeClick}
+                  className="w-full bg-amber-600 hover:bg-amber-500 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition flex items-center justify-center gap-2"
+                >
+                  🌉 Bridge from Arbitrum
+                </button>
+                
+                <button
+                  onClick={() => setStep('offramp')}
+                  className="w-full bg-zinc-600 hover:bg-zinc-500 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition flex items-center justify-center gap-2"
+                >
+                  🏦 Withdraw to Bank
+                </button>
+              </div>
             </div>
 
             <p className="text-zinc-400 text-sm mb-4">
@@ -1022,19 +1068,15 @@ export default function Home() {
           </div>
         )}
 
-        {/* Onramp Step */}
+        {/* Onramp Step - Onramper Widget */}
         {step === 'onramp' && (
-          <div className="text-center">
-            <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="text-3xl">💳</span>
-            </div>
-            <h2 className="text-xl font-semibold mb-2">Buy USDC</h2>
-            <p className="text-zinc-400 text-sm mb-4">
-              Fund your wallet with USDC on Arbitrum using MoonPay. KYC may be required depending on your region.
-            </p>
-
+          <div className="text-center w-full">
             {!authenticated ? (
               <div className="space-y-3">
+                <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">💳</span>
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Buy USDC</h2>
                 <p className="text-zinc-500 text-sm mb-4">
                   Please log in to fund your wallet.
                 </p>
@@ -1047,6 +1089,10 @@ export default function Home() {
               </div>
             ) : wallets.length === 0 ? (
               <div className="space-y-3">
+                <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">💳</span>
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Buy USDC</h2>
                 <p className="text-zinc-500 text-sm mb-4">
                   No wallet found. Please connect a wallet first.
                 </p>
@@ -1057,39 +1103,121 @@ export default function Home() {
                   Connect Wallet
                 </button>
               </div>
-            ) : (
+            ) : !ONRAMPER_API_KEY ? (
               <div className="space-y-3">
-                <div className="bg-zinc-800/50 rounded-lg p-3 mb-4 text-left">
-                  <p className="text-xs text-zinc-500 mb-1">Wallet Address</p>
-                  <p className="text-sm font-mono text-zinc-300 break-all">
-                    {wallets.find((w) => w.walletClientType === 'privy')?.address || wallets[0]?.address}
-                  </p>
+                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">⚠️</span>
                 </div>
-
-                {error && (
-                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4">
-                    <p className="text-red-400 text-sm">{error}</p>
-                  </div>
-                )}
-
-                <button
-                  onClick={handleMoonPayFunding}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 px-4 rounded-lg font-semibold transition flex items-center justify-center gap-2"
-                >
-                  💳 Buy USDC with MoonPay
-                </button>
-                <p className="text-xs text-zinc-500 mt-2">
-                  Opens in external browser
+                <h2 className="text-xl font-semibold mb-2">Configuration Required</h2>
+                <p className="text-zinc-400 text-sm mb-4">
+                  Onramper API key not configured. Please contact support.
                 </p>
+                <button 
+                  onClick={() => closeMiniApp()} 
+                  className="w-full bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm transition"
+                >
+                  Return to Telegram
+                </button>
+              </div>
+            ) : (
+              <div className="w-full -mx-6 -mb-6">
+                <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
+                  <h2 className="text-lg font-semibold">Buy USDC</h2>
+                  <button 
+                    onClick={() => closeMiniApp()} 
+                    className="text-zinc-400 hover:text-white text-sm"
+                  >
+                    ✕ Close
+                  </button>
+                </div>
+                <iframe
+                  src={getOnramperUrl('buy')}
+                  className="w-full border-0"
+                  style={{ height: 'calc(100vh - 120px)', minHeight: '500px' }}
+                  allow="accelerometer; autoplay; camera; gyroscope; payment"
+                  title="Buy USDC with Onramper"
+                />
               </div>
             )}
+          </div>
+        )}
 
-            <button 
-              onClick={() => closeMiniApp()} 
-              className="mt-4 w-full bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm transition"
-            >
-              Return to Telegram
-            </button>
+        {/* Offramp Step - Onramper Sell Widget */}
+        {step === 'offramp' && (
+          <div className="text-center w-full">
+            {!authenticated ? (
+              <div className="space-y-3">
+                <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">🏦</span>
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Withdraw to Bank</h2>
+                <p className="text-zinc-500 text-sm mb-4">
+                  Please log in to withdraw funds.
+                </p>
+                <button
+                  onClick={handleLogin}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 px-4 rounded-lg font-semibold transition"
+                >
+                  Log In
+                </button>
+              </div>
+            ) : wallets.length === 0 ? (
+              <div className="space-y-3">
+                <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">🏦</span>
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Withdraw to Bank</h2>
+                <p className="text-zinc-500 text-sm mb-4">
+                  No wallet found. Please connect a wallet first.
+                </p>
+                <button
+                  onClick={() => setStep('authorize')}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 px-4 rounded-lg font-semibold transition"
+                >
+                  Connect Wallet
+                </button>
+              </div>
+            ) : !ONRAMPER_API_KEY ? (
+              <div className="space-y-3">
+                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">⚠️</span>
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Configuration Required</h2>
+                <p className="text-zinc-400 text-sm mb-4">
+                  Onramper API key not configured. Please contact support.
+                </p>
+                <button 
+                  onClick={() => closeMiniApp()} 
+                  className="w-full bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm transition"
+                >
+                  Return to Telegram
+                </button>
+              </div>
+            ) : (
+              <div className="w-full -mx-6 -mb-6">
+                <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
+                  <h2 className="text-lg font-semibold">Sell USDC</h2>
+                  <button 
+                    onClick={() => closeMiniApp()} 
+                    className="text-zinc-400 hover:text-white text-sm"
+                  >
+                    ✕ Close
+                  </button>
+                </div>
+                <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2">
+                  <p className="text-amber-400 text-xs">
+                    ⚠️ To sell, your USDC must be on Arbitrum. Withdraw from Hyperliquid first if needed.
+                  </p>
+                </div>
+                <iframe
+                  src={getOnramperUrl('sell')}
+                  className="w-full border-0"
+                  style={{ height: 'calc(100vh - 160px)', minHeight: '500px' }}
+                  allow="accelerometer; autoplay; camera; gyroscope; payment"
+                  title="Sell USDC with Onramper"
+                />
+              </div>
+            )}
           </div>
         )}
 

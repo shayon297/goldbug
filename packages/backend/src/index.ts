@@ -5,7 +5,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { ethers } from 'ethers';
 import { createBot, startBot } from './telegram/bot.js';
-import { prisma, createUser, getAllUsers, getOrCreateSession, clearSession, getUserByTelegramId } from './state/db.js';
+import { prisma, createUser, getAllUsers, getOrCreateSession, clearSession, getUserByTelegramId, getLeaderboard } from './state/db.js';
 import { getHyperliquidClient, TRADING_ASSET } from './hyperliquid/client.js';
 import {
   verifyPrivyToken,
@@ -13,6 +13,7 @@ import {
   validateTelegramInitData,
   extractTelegramUserId,
 } from './privy/verify.js';
+import { trackEvent, EVENT_TYPES } from './state/analytics.js';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -98,6 +99,453 @@ async function main() {
       res.json({ coin: 'GOLD', price, timestamp: Date.now() });
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch price' });
+    }
+  });
+
+  // Leaderboard endpoint (public)
+  app.get('/api/leaderboard', async (req, res) => {
+    try {
+      const hl = await getHyperliquidClient();
+      const users = await getLeaderboard(50);
+      
+      // Fetch volume and PnL data from Hyperliquid for each user
+      const leaderboardData = await Promise.all(
+        users.map(async (user, index) => {
+          try {
+            // Get user fills to calculate volume
+            const fills = await hl.getUserFills(user.walletAddress);
+            const totalVolume = fills.reduce((sum, fill) => {
+              const px = parseFloat(fill.px);
+              const sz = parseFloat(fill.sz);
+              return sum + (px * sz);
+            }, 0);
+
+            // Get current position for unrealized PnL
+            const position = await hl.getGoldPosition(user.walletAddress);
+            const unrealizedPnl = position ? parseFloat(position.position.unrealizedPnl || '0') : 0;
+
+            // Calculate realized PnL from fills
+            const realizedPnl = fills.reduce((sum, fill) => {
+              return sum + parseFloat(fill.closedPnl || '0');
+            }, 0);
+
+            return {
+              rank: index + 1,
+              wallet: user.walletAddress,
+              volume: Math.round(totalVolume * 100) / 100,
+              pnl: Math.round((unrealizedPnl + realizedPnl) * 100) / 100,
+              points: user.points,
+            };
+          } catch (err) {
+            console.error(`[Leaderboard] Error fetching data for ${user.walletAddress}:`, err);
+            return {
+              rank: index + 1,
+              wallet: user.walletAddress,
+              volume: 0,
+              pnl: 0,
+              points: user.points,
+            };
+          }
+        })
+      );
+
+      // Sort by volume (primary) and re-rank
+      leaderboardData.sort((a, b) => b.volume - a.volume);
+      leaderboardData.forEach((entry, i) => {
+        entry.rank = i + 1;
+      });
+
+      res.json({
+        leaderboard: leaderboardData,
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      console.error('[Leaderboard] Error:', error);
+      res.status(500).json({ error: 'Failed to fetch leaderboard' });
+    }
+  });
+
+  // =====================
+  // Analytics API Endpoints (protected with API key)
+  // =====================
+  const ANALYTICS_API_KEY = process.env.ANALYTICS_API_KEY || 'goldbug-analytics-secret';
+  
+  const analyticsAuth = (req: Request, res: Response, next: NextFunction) => {
+    const apiKey = req.headers['x-api-key'] || req.query.apiKey;
+    if (apiKey !== ANALYTICS_API_KEY) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    next();
+  };
+
+  // Analytics Overview - summary metrics
+  app.get('/api/analytics/overview', analyticsAuth, async (req: Request, res: Response) => {
+    try {
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(weekStart.getDate() - 7);
+      const monthStart = new Date(todayStart);
+      monthStart.setDate(monthStart.getDate() - 30);
+
+      // User counts
+      const [totalUsers, usersToday, usersThisWeek, usersThisMonth] = await Promise.all([
+        prisma.user.count(),
+        prisma.user.count({ where: { createdAt: { gte: todayStart } } }),
+        prisma.user.count({ where: { createdAt: { gte: weekStart } } }),
+        prisma.user.count({ where: { createdAt: { gte: monthStart } } }),
+      ]);
+
+      // Event counts
+      const [signups, trades, firstTrades, sessions] = await Promise.all([
+        prisma.analyticsEvent.count({ where: { eventType: 'signup', createdAt: { gte: monthStart } } }),
+        prisma.analyticsEvent.count({ where: { eventType: 'trade_executed', createdAt: { gte: monthStart } } }),
+        prisma.analyticsEvent.count({ where: { eventType: 'first_trade', createdAt: { gte: monthStart } } }),
+        prisma.analyticsEvent.count({ where: { eventType: 'session_start', createdAt: { gte: monthStart } } }),
+      ]);
+
+      // Calculate conversion rate
+      const conversionRate = totalUsers > 0 ? (firstTrades / signups) * 100 : 0;
+
+      res.json({
+        users: {
+          total: totalUsers,
+          today: usersToday,
+          thisWeek: usersThisWeek,
+          thisMonth: usersThisMonth,
+        },
+        activity: {
+          signups,
+          trades,
+          firstTrades,
+          sessions,
+          conversionRate: Math.round(conversionRate * 100) / 100,
+        },
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      console.error('[Analytics] Overview error:', error);
+      res.status(500).json({ error: 'Failed to fetch analytics overview' });
+    }
+  });
+
+  // Analytics Users - user growth over time
+  app.get('/api/analytics/users', analyticsAuth, async (req: Request, res: Response) => {
+    try {
+      const days = parseInt(req.query.days as string) || 30;
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+
+      // Get all users created in the period
+      const users = await prisma.user.findMany({
+        where: { createdAt: { gte: startDate } },
+        select: { createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      // Group by date
+      const dailyCounts: Record<string, number> = {};
+      for (let i = 0; i <= days; i++) {
+        const d = new Date(startDate);
+        d.setDate(d.getDate() + i);
+        dailyCounts[d.toISOString().split('T')[0]] = 0;
+      }
+
+      users.forEach(u => {
+        const dateStr = u.createdAt.toISOString().split('T')[0];
+        if (dailyCounts[dateStr] !== undefined) {
+          dailyCounts[dateStr]++;
+        }
+      });
+
+      // Calculate cumulative
+      let cumulative = await prisma.user.count({ where: { createdAt: { lt: startDate } } });
+      const data = Object.entries(dailyCounts).map(([date, count]) => {
+        cumulative += count;
+        return { date, newUsers: count, totalUsers: cumulative };
+      });
+
+      res.json({ data, timestamp: Date.now() });
+    } catch (error) {
+      console.error('[Analytics] Users error:', error);
+      res.status(500).json({ error: 'Failed to fetch user analytics' });
+    }
+  });
+
+  // Analytics Retention - cohort analysis
+  app.get('/api/analytics/retention', analyticsAuth, async (req: Request, res: Response) => {
+    try {
+      const weeks = parseInt(req.query.weeks as string) || 8;
+      const now = new Date();
+      
+      const cohorts: Array<{
+        cohortWeek: string;
+        cohortSize: number;
+        retention: number[];
+      }> = [];
+
+      for (let w = weeks - 1; w >= 0; w--) {
+        const cohortStart = new Date(now);
+        cohortStart.setDate(cohortStart.getDate() - (w + 1) * 7);
+        const cohortEnd = new Date(cohortStart);
+        cohortEnd.setDate(cohortEnd.getDate() + 7);
+
+        // Users who signed up in this week
+        const cohortUsers = await prisma.user.findMany({
+          where: {
+            createdAt: {
+              gte: cohortStart,
+              lt: cohortEnd,
+            },
+          },
+          select: { telegramId: true, createdAt: true },
+        });
+
+        const cohortSize = cohortUsers.length;
+        if (cohortSize === 0) {
+          cohorts.push({
+            cohortWeek: cohortStart.toISOString().split('T')[0],
+            cohortSize: 0,
+            retention: [],
+          });
+          continue;
+        }
+
+        const telegramIds = cohortUsers.map(u => u.telegramId);
+        const retention: number[] = [];
+
+        // Check retention for each subsequent week
+        for (let retentionWeek = 0; retentionWeek <= w; retentionWeek++) {
+          const weekStart = new Date(cohortEnd);
+          weekStart.setDate(weekStart.getDate() + retentionWeek * 7);
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekEnd.getDate() + 7);
+
+          // Count users who had any session in this week
+          const activeCount = await prisma.analyticsEvent.groupBy({
+            by: ['telegramId'],
+            where: {
+              telegramId: { in: telegramIds },
+              eventType: 'session_start',
+              createdAt: {
+                gte: weekStart,
+                lt: weekEnd,
+              },
+            },
+          });
+
+          const retentionRate = cohortSize > 0 ? (activeCount.length / cohortSize) * 100 : 0;
+          retention.push(Math.round(retentionRate));
+        }
+
+        cohorts.push({
+          cohortWeek: cohortStart.toISOString().split('T')[0],
+          cohortSize,
+          retention,
+        });
+      }
+
+      res.json({ cohorts, timestamp: Date.now() });
+    } catch (error) {
+      console.error('[Analytics] Retention error:', error);
+      res.status(500).json({ error: 'Failed to fetch retention analytics' });
+    }
+  });
+
+  // Analytics Funnel - conversion funnel metrics
+  app.get('/api/analytics/funnel', analyticsAuth, async (req: Request, res: Response) => {
+    try {
+      const days = parseInt(req.query.days as string) || 30;
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+
+      const [signups, walletConnected, agentApproved, firstTrades, totalTrades] = await Promise.all([
+        prisma.analyticsEvent.groupBy({
+          by: ['telegramId'],
+          where: { eventType: 'signup', createdAt: { gte: startDate } },
+        }),
+        prisma.analyticsEvent.groupBy({
+          by: ['telegramId'],
+          where: { eventType: 'wallet_connected', createdAt: { gte: startDate } },
+        }),
+        prisma.analyticsEvent.groupBy({
+          by: ['telegramId'],
+          where: { eventType: 'agent_approved', createdAt: { gte: startDate } },
+        }),
+        prisma.analyticsEvent.groupBy({
+          by: ['telegramId'],
+          where: { eventType: 'first_trade', createdAt: { gte: startDate } },
+        }),
+        prisma.analyticsEvent.count({
+          where: { eventType: 'trade_executed', createdAt: { gte: startDate } },
+        }),
+      ]);
+
+      const funnel = {
+        signups: signups.length,
+        walletConnected: walletConnected.length,
+        agentApproved: agentApproved.length,
+        firstTrade: firstTrades.length,
+        totalTrades,
+      };
+
+      // Calculate conversion rates
+      const rates = {
+        signupToWallet: funnel.signups > 0 ? (funnel.walletConnected / funnel.signups) * 100 : 0,
+        walletToApproved: funnel.walletConnected > 0 ? (funnel.agentApproved / funnel.walletConnected) * 100 : 0,
+        approvedToFirstTrade: funnel.agentApproved > 0 ? (funnel.firstTrade / funnel.agentApproved) * 100 : 0,
+        overallConversion: funnel.signups > 0 ? (funnel.firstTrade / funnel.signups) * 100 : 0,
+      };
+
+      res.json({ funnel, rates, timestamp: Date.now() });
+    } catch (error) {
+      console.error('[Analytics] Funnel error:', error);
+      res.status(500).json({ error: 'Failed to fetch funnel analytics' });
+    }
+  });
+
+  // Analytics Engagement - DAU/WAU/MAU
+  app.get('/api/analytics/engagement', analyticsAuth, async (req: Request, res: Response) => {
+    try {
+      const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(weekStart.getDate() - 7);
+      const monthStart = new Date(todayStart);
+      monthStart.setDate(monthStart.getDate() - 30);
+
+      const [dauResult, wauResult, mauResult, totalUsers] = await Promise.all([
+        prisma.analyticsEvent.groupBy({
+          by: ['telegramId'],
+          where: {
+            eventType: 'session_start',
+            telegramId: { not: null },
+            createdAt: { gte: todayStart },
+          },
+        }),
+        prisma.analyticsEvent.groupBy({
+          by: ['telegramId'],
+          where: {
+            eventType: 'session_start',
+            telegramId: { not: null },
+            createdAt: { gte: weekStart },
+          },
+        }),
+        prisma.analyticsEvent.groupBy({
+          by: ['telegramId'],
+          where: {
+            eventType: 'session_start',
+            telegramId: { not: null },
+            createdAt: { gte: monthStart },
+          },
+        }),
+        prisma.user.count(),
+      ]);
+
+      const dau = dauResult.length;
+      const wau = wauResult.length;
+      const mau = mauResult.length;
+      const stickiness = mau > 0 ? (dau / mau) * 100 : 0;
+
+      // Get daily active users for past 30 days
+      const dailyActiveData: Array<{ date: string; dau: number }> = [];
+      for (let i = 29; i >= 0; i--) {
+        const dayStart = new Date(todayStart);
+        dayStart.setDate(dayStart.getDate() - i);
+        const dayEnd = new Date(dayStart);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+
+        const result = await prisma.analyticsEvent.groupBy({
+          by: ['telegramId'],
+          where: {
+            eventType: 'session_start',
+            telegramId: { not: null },
+            createdAt: { gte: dayStart, lt: dayEnd },
+          },
+        });
+
+        dailyActiveData.push({
+          date: dayStart.toISOString().split('T')[0],
+          dau: result.length,
+        });
+      }
+
+      res.json({
+        dau,
+        wau,
+        mau,
+        totalUsers,
+        stickiness: Math.round(stickiness * 100) / 100,
+        dailyActiveData,
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      console.error('[Analytics] Engagement error:', error);
+      res.status(500).json({ error: 'Failed to fetch engagement analytics' });
+    }
+  });
+
+  // Analytics Trades - trading activity breakdown
+  app.get('/api/analytics/trades', analyticsAuth, async (req: Request, res: Response) => {
+    try {
+      const days = parseInt(req.query.days as string) || 30;
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+
+      // Get all trade events with metadata
+      const trades = await prisma.analyticsEvent.findMany({
+        where: {
+          eventType: 'trade_executed',
+          createdAt: { gte: startDate },
+        },
+        select: {
+          metadata: true,
+          createdAt: true,
+        },
+      });
+
+      // Parse and aggregate trade data
+      let totalVolume = 0;
+      let longCount = 0;
+      let shortCount = 0;
+      const leverageDistribution: Record<number, number> = {};
+      const dailyVolume: Record<string, number> = {};
+
+      trades.forEach(trade => {
+        const meta = trade.metadata ? JSON.parse(trade.metadata) : {};
+        const sizeUsd = meta.sizeUsd || 0;
+        const leverage = meta.leverage || 1;
+        const side = meta.side || 'long';
+
+        totalVolume += sizeUsd;
+        if (side === 'long') longCount++;
+        else shortCount++;
+
+        leverageDistribution[leverage] = (leverageDistribution[leverage] || 0) + 1;
+
+        const dateStr = trade.createdAt.toISOString().split('T')[0];
+        dailyVolume[dateStr] = (dailyVolume[dateStr] || 0) + sizeUsd;
+      });
+
+      const dailyVolumeData = Object.entries(dailyVolume)
+        .map(([date, volume]) => ({ date, volume }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      res.json({
+        totalTrades: trades.length,
+        totalVolume: Math.round(totalVolume * 100) / 100,
+        avgTradeSize: trades.length > 0 ? Math.round((totalVolume / trades.length) * 100) / 100 : 0,
+        longCount,
+        shortCount,
+        leverageDistribution,
+        dailyVolumeData,
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      console.error('[Analytics] Trades error:', error);
+      res.status(500).json({ error: 'Failed to fetch trades analytics' });
     }
   });
 
@@ -265,6 +713,13 @@ async function main() {
       });
 
       console.log(`[Register] User ${telegramUserId} registered with wallet ${privyUser.walletAddress}`);
+
+      // Track signup event
+      await trackEvent({
+        telegramId: BigInt(telegramUserId),
+        eventType: EVENT_TYPES.SIGNUP,
+        metadata: { walletAddress: privyUser.walletAddress },
+      });
 
       res.json({
         success: true,

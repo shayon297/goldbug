@@ -39,6 +39,7 @@ import {
   POINTS_CONFIG,
   type OrderContext,
 } from '../state/db.js';
+import { trackEvent, EVENT_TYPES, hasUserEvent } from '../state/analytics.js';
 import { getHyperliquidClient, TRADING_ASSET } from '../hyperliquid/client.js';
 
 const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
@@ -163,6 +164,15 @@ export function registerHandlers(bot: Telegraf) {
     const telegramId = BigInt(ctx.from.id);
     const exists = await userExists(telegramId);
 
+    // Track session start event
+    if (exists) {
+      await trackEvent({
+        telegramId,
+        eventType: EVENT_TYPES.SESSION_START,
+        metadata: { command: 'start' },
+      });
+    }
+
     // Extract deep link payload (text after "/start ")
     const messageText = ctx.message.text || '';
     const payload = messageText.replace(/^\/start\s*/, '').trim();
@@ -280,13 +290,17 @@ export function registerHandlers(bot: Telegraf) {
   bot.command('help', async (ctx) => {
     await ctx.replyWithMarkdown(
       `🥇 *${TRADING_ASSET} Trade Bot*\n\n` +
-      `*Commands:*\n` +
+      `*Trading:*\n` +
       `/long - Open a long position\n` +
       `/short - Open a short position\n` +
-      `/status - Balance, position & orders\n` +
       `/close - Close your position\n` +
-      `/fund - Add funds\n` +
+      `/status - Balance, position & orders\n` +
       `/price - Current price\n\n` +
+      `*Funding:*\n` +
+      `/fund - Add or withdraw funds\n` +
+      `/onramp - Buy USDC with card/bank\n` +
+      `/withdraw - Sell USDC to bank\n` +
+      `/bridge - Bridge USDC to Hyperliquid\n\n` +
       `*Quick Trade Examples:*\n` +
       `• \`/long $100 5x\`\n` +
       `• \`/short $500 10x market\`\n` +
@@ -313,7 +327,7 @@ export function registerHandlers(bot: Telegraf) {
     }
   });
 
-  // /fund command (combines bridge + onramp + deposit)
+  // /fund command (combines all funding options)
   bot.command('fund', async (ctx) => {
     const telegramId = BigInt(ctx.from.id);
     const user = await getUserByTelegramId(telegramId);
@@ -324,14 +338,15 @@ export function registerHandlers(bot: Telegraf) {
     }
 
     await ctx.replyWithMarkdown(
-      `💰 *Add Funds*\n\n` +
+      `💰 *Manage Funds*\n\n` +
       `*Your Wallet:*\n\`${user.walletAddress}\`\n\n` +
-      `Choose how to fund your account:`,
+      `Choose an option:`,
       {
         reply_markup: {
           inline_keyboard: [
             [{ text: '💳 Buy USDC', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
-            [{ text: '🌉 Bridge from Arbitrum', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+            [{ text: '🌉 Bridge to Hyperliquid', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+            [{ text: '🏦 Withdraw to Bank', web_app: { url: `${MINIAPP_URL}?action=offramp` } }],
             [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
           ],
         },
@@ -437,12 +452,63 @@ export function registerHandlers(bot: Telegraf) {
     }
 
     await ctx.replyWithMarkdown(
-      `💳 *Buy USDC (Arbitrum)*\n\n` +
-      `Tap below to choose an onramp provider. KYC may be required depending on region.`,
+      `💳 *Buy USDC*\n\n` +
+      `Purchase USDC with card, bank transfer, or other payment methods.\n` +
+      `KYC may be required depending on your region.`,
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '💳 Open Onramp', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+            [{ text: '💳 Buy USDC', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+          ],
+        },
+      }
+    );
+  });
+
+  // /offramp command - sell crypto for fiat
+  bot.command('offramp', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    await ctx.replyWithMarkdown(
+      `🏦 *Sell USDC*\n\n` +
+      `Convert your USDC to fiat and withdraw to your bank.\n\n` +
+      `⚠️ *Note:* Your USDC must be on Arbitrum (not Hyperliquid).\n` +
+      `Use the Hyperliquid website to withdraw first if needed.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏦 Sell USDC', web_app: { url: `${MINIAPP_URL}?action=offramp` } }],
+          ],
+        },
+      }
+    );
+  });
+
+  // /withdraw command - alias for offramp (more intuitive name)
+  bot.command('withdraw', async (ctx) => {
+    const telegramId = BigInt(ctx.from.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
+      return;
+    }
+
+    await ctx.replyWithMarkdown(
+      `🏦 *Withdraw to Bank*\n\n` +
+      `Convert your USDC to fiat and withdraw to your bank account.\n\n` +
+      `⚠️ *Important:* Your USDC must be on Arbitrum.\n` +
+      `If your funds are on Hyperliquid, withdraw to Arbitrum first at [app.hyperliquid.xyz](https://app.hyperliquid.xyz).`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🏦 Withdraw to Bank', web_app: { url: `${MINIAPP_URL}?action=offramp` } }],
           ],
         },
       }
@@ -1018,6 +1084,28 @@ export function registerHandlers(bot: Telegraf) {
           const avgPrice = parseFloat(response.filled.avgPx);
           const totalSz = parseFloat(response.filled.totalSz);
           const notionalUsd = (avgPrice * totalSz).toFixed(2);
+          
+          // Track trade event
+          const isFirstTrade = !(await hasUserEvent(telegramId, EVENT_TYPES.TRADE_EXECUTED));
+          if (isFirstTrade) {
+            await trackEvent({
+              telegramId,
+              eventType: EVENT_TYPES.FIRST_TRADE,
+              metadata: { side: session.side, sizeUsd: session.sizeUsd, leverage: session.leverage },
+            });
+          }
+          await trackEvent({
+            telegramId,
+            eventType: EVENT_TYPES.TRADE_EXECUTED,
+            metadata: {
+              side: session.side,
+              sizeUsd: session.sizeUsd,
+              leverage: session.leverage,
+              orderType: session.orderType,
+              avgPrice,
+              totalSz,
+            },
+          });
           
           // Use trade receipt keyboard with share/copy buttons
           const receiptKeyboard = tradeReceiptKeyboard({
