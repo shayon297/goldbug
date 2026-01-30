@@ -5,6 +5,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { ethers } from 'ethers';
 import { createBot, startBot } from './telegram/bot.js';
+import { startChartScheduler } from './services/scheduler.js';
 import { prisma, createUser, getAllUsers, getOrCreateSession, clearSession, getUserByTelegramId, getLeaderboard } from './state/db.js';
 import { getHyperliquidClient, TRADING_ASSET } from './hyperliquid/client.js';
 import {
@@ -124,9 +125,10 @@ async function main() {
             const position = await hl.getGoldPosition(user.walletAddress);
             const unrealizedPnl = position ? parseFloat(position.position.unrealizedPnl || '0') : 0;
 
-            // Calculate realized PnL from fills
+            // Calculate realized PnL from fills (closedPnl may not always be present)
             const realizedPnl = fills.reduce((sum, fill) => {
-              return sum + parseFloat(fill.closedPnl || '0');
+              const fillAny = fill as any;
+              return sum + parseFloat(fillAny.closedPnl || '0');
             }, 0);
 
             return {
@@ -936,6 +938,9 @@ async function main() {
   } else {
     await startBot(bot);
   }
+
+  // Start 12-hour chart broadcast scheduler
+  startChartScheduler(bot);
 
   // Hourly (6h) position updates
   const POSITION_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;

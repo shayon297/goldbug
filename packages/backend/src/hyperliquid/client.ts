@@ -7,6 +7,8 @@ import type {
   OrderResult,
   PlaceOrderParams,
   AssetPosition,
+  Candle,
+  CandleInterval,
 } from './types.js';
 
 /**
@@ -277,6 +279,46 @@ export class HyperliquidClient {
       aggregateByTime: true,
     });
     return fills.filter((fill) => fill.coin === ASSET_CONFIG.fullName);
+  }
+
+  /**
+   * Get candle (OHLC) data for the trading asset
+   * @param interval - Candle interval (e.g., '1h', '4h', '1d')
+   * @param count - Number of candles to fetch (max 5000)
+   */
+  async getCandles(interval: CandleInterval = '4h', count: number = 100): Promise<Candle[]> {
+    // Calculate time range based on interval
+    const intervalMs: Record<CandleInterval, number> = {
+      '1m': 60 * 1000,
+      '3m': 3 * 60 * 1000,
+      '5m': 5 * 60 * 1000,
+      '15m': 15 * 60 * 1000,
+      '30m': 30 * 60 * 1000,
+      '1h': 60 * 60 * 1000,
+      '2h': 2 * 60 * 60 * 1000,
+      '4h': 4 * 60 * 60 * 1000,
+      '8h': 8 * 60 * 60 * 1000,
+      '12h': 12 * 60 * 60 * 1000,
+      '1d': 24 * 60 * 60 * 1000,
+      '3d': 3 * 24 * 60 * 60 * 1000,
+      '1w': 7 * 24 * 60 * 60 * 1000,
+      '1M': 30 * 24 * 60 * 60 * 1000,
+    };
+
+    const endTime = Date.now();
+    const startTime = endTime - intervalMs[interval] * count;
+
+    const candles = await this.infoRequest<Candle[]>({
+      type: 'candleSnapshot',
+      req: {
+        coin: ASSET_CONFIG.fullName,
+        interval,
+        startTime,
+        endTime,
+      },
+    });
+
+    return candles;
   }
 
   /**

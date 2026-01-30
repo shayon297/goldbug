@@ -97,6 +97,22 @@ export interface PlaceOrderParams {
   limitPrice?: number;
 }
 
+// Candle data from Hyperliquid
+export interface Candle {
+  t: number;  // Timestamp (ms)
+  T: number;  // Close timestamp (ms)
+  s: string;  // Symbol
+  i: string;  // Interval
+  o: string;  // Open price
+  c: string;  // Close price
+  h: string;  // High price
+  l: string;  // Low price
+  v: string;  // Volume
+  n: number;  // Number of trades
+}
+
+export type CandleInterval = '1m' | '3m' | '5m' | '15m' | '30m' | '1h' | '2h' | '4h' | '8h' | '12h' | '1d' | '3d' | '1w' | '1M';
+
 // EIP-712 signing types for Hyperliquid
 export const HYPERLIQUID_DOMAIN = {
   name: 'HyperliquidSignTransaction',

@@ -11,8 +11,8 @@ const BOT_COMMANDS = [
   { command: 'short', description: `Open a SHORT position` },
   { command: 'status', description: 'Balance, position & orders' },
   { command: 'close', description: 'Close your position' },
+  { command: 'chart', description: '📊 Price chart with indicators' },
   { command: 'fund', description: '💳 Add funds (bridge or buy)' },
-  { command: 'price', description: `Current ${TRADING_ASSET} price` },
   { command: 'help', description: 'Commands & examples' },
 ];
 

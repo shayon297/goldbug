@@ -41,6 +41,7 @@ import {
 } from '../state/db.js';
 import { trackEvent, EVENT_TYPES, hasUserEvent } from '../state/analytics.js';
 import { getHyperliquidClient, TRADING_ASSET } from '../hyperliquid/client.js';
+import { generateChartBuffer, generateChartSummary } from '../services/chart.js';
 
 const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
 const BUILDER_ADDRESS = process.env.BUILDER_ADDRESS || '';
@@ -365,6 +366,40 @@ export function registerHandlers(bot: Telegraf) {
       );
     } catch (error) {
       await ctx.reply('Error fetching price. Please try again.');
+    }
+  });
+
+  // /chart command - generate price chart with indicators
+  bot.command('chart', async (ctx) => {
+    try {
+      await ctx.reply('📊 Generating chart...');
+      
+      const hl = await getHyperliquidClient();
+      const candles = await hl.getCandles('4h', 100);
+      
+      if (candles.length === 0) {
+        await ctx.reply('No chart data available. Please try again later.');
+        return;
+      }
+
+      const chartBuffer = await generateChartBuffer({
+        candles,
+        symbol: TRADING_ASSET,
+        interval: '4H',
+      });
+
+      const summary = generateChartSummary(candles, TRADING_ASSET);
+
+      await ctx.replyWithPhoto(
+        { source: chartBuffer },
+        {
+          caption: summary,
+          parse_mode: 'Markdown',
+        }
+      );
+    } catch (error) {
+      console.error('[Chart] Error generating chart:', error);
+      await ctx.reply('Error generating chart. Please try again later.');
     }
   });
 
