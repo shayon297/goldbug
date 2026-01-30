@@ -167,6 +167,28 @@ async function main() {
     }
   });
 
+  // Get user wallet by Telegram ID (for Mini App to check existing user)
+  app.get('/api/user/:telegramId', async (req, res) => {
+    try {
+      const telegramId = BigInt(req.params.telegramId);
+      const user = await getUserByTelegramId(telegramId);
+      
+      if (!user) {
+        res.status(404).json({ exists: false });
+        return;
+      }
+
+      res.json({
+        exists: true,
+        walletAddress: user.walletAddress,
+        points: user.points,
+      });
+    } catch (error) {
+      console.error('[User] Error fetching user:', error);
+      res.status(500).json({ error: 'Failed to fetch user' });
+    }
+  });
+
   // =====================
   // Analytics API Endpoints (protected with API key)
   // =====================

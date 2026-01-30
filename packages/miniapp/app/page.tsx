@@ -61,6 +61,8 @@ export default function Home() {
   const [wantsOfframp, setWantsOfframp] = useState(false);
   const [wantsFunding, setWantsFunding] = useState(false);
   const [fundingAddress, setFundingAddress] = useState<string | null>(null);
+  const [backendWallet, setBackendWallet] = useState<string | null>(null);
+  const [backendChecked, setBackendChecked] = useState(false);
   const checkedUrl = useRef(false);
   const fundingTriggered = useRef(false);
 
@@ -148,6 +150,34 @@ export default function Home() {
       console.log('[MiniApp] External browser funding mode - skipping Telegram check');
     }
   }, []);
+
+  // Check if user already exists in our backend (has a registered wallet)
+  // This allows us to skip Privy re-auth for simple actions like onramp
+  useEffect(() => {
+    if (!telegramUser || backendChecked) return;
+    
+    const checkExistingUser = async () => {
+      try {
+        console.log('[MiniApp] Checking if user exists in backend:', telegramUser.id);
+        const response = await fetch(`${API_URL}/api/user/${telegramUser.id}`);
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.exists && data.walletAddress) {
+            console.log('[MiniApp] Found existing user wallet:', data.walletAddress);
+            setBackendWallet(data.walletAddress);
+            setRegisteredWallet(data.walletAddress);
+          }
+        }
+      } catch (err) {
+        console.error('[MiniApp] Error checking backend user:', err);
+      } finally {
+        setBackendChecked(true);
+      }
+    };
+    
+    checkExistingUser();
+  }, [telegramUser, backendChecked]);
 
   // Auto-create wallet if authenticated but no wallet exists
   // This is needed because automatic wallet creation may not work with seamless Telegram login
@@ -697,9 +727,14 @@ export default function Home() {
   }, [fetchBalances]);
 
   // Generate Onramper widget URL
+  // Prioritize backendWallet (existing user) over Privy wallet
   const getOnramperUrl = useCallback((mode: 'buy' | 'sell') => {
+    // Use backend wallet if available (no Privy re-auth needed)
+    // Otherwise fall back to Privy embedded wallet
     const embeddedWallet = wallets.find((w) => w.walletClientType === 'privy');
-    const walletAddress = embeddedWallet?.address || wallets[0]?.address || '';
+    const walletAddress = backendWallet || embeddedWallet?.address || wallets[0]?.address || '';
+    
+    console.log('[MiniApp] Onramper URL for wallet:', walletAddress);
     
     const params = new URLSearchParams({
       apiKey: ONRAMPER_API_KEY,
@@ -712,13 +747,13 @@ export default function Home() {
       primaryColor: 'f59e0bff', // amber-500
       secondaryColor: '3f3f46ff', // zinc-700
       cardColor: '27272aff', // zinc-800
-      primaryTextColor: 'faboraff', // white
+      primaryTextColor: 'ffffffff', // white (fixed typo)
       secondaryTextColor: 'a1a1aaff', // zinc-400
       borderRadius: '0.75', // rounded-lg
     });
 
     return `https://buy.onramper.com/?${params.toString()}`;
-  }, [wallets]);
+  }, [wallets, backendWallet]);
 
   // Handle bridge execution - tries gas sponsorship, falls back to gas drip
   const handleBridge = useCallback(async () => {
@@ -1093,7 +1128,13 @@ export default function Home() {
         {/* Onramp Step - Onramper Widget */}
         {step === 'onramp' && (
           <div className="text-center w-full">
-            {!authenticated ? (
+            {/* If we have backend wallet, show onramp directly - no Privy auth needed */}
+            {!backendChecked ? (
+              <div className="space-y-3">
+                <div className="spinner mx-auto mb-4" />
+                <p className="text-zinc-400">Loading...</p>
+              </div>
+            ) : !backendWallet && !authenticated ? (
               <div className="space-y-3">
                 <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                   <span className="text-3xl">💳</span>
@@ -1109,7 +1150,7 @@ export default function Home() {
                   Log In
                 </button>
               </div>
-            ) : wallets.length === 0 ? (
+            ) : !backendWallet && wallets.length === 0 ? (
               <div className="space-y-3">
                 <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                   <span className="text-3xl">💳</span>
@@ -1167,7 +1208,13 @@ export default function Home() {
         {/* Offramp Step - Onramper Sell Widget */}
         {step === 'offramp' && (
           <div className="text-center w-full">
-            {!authenticated ? (
+            {/* If we have backend wallet, show offramp directly - no Privy auth needed */}
+            {!backendChecked ? (
+              <div className="space-y-3">
+                <div className="spinner mx-auto mb-4" />
+                <p className="text-zinc-400">Loading...</p>
+              </div>
+            ) : !backendWallet && !authenticated ? (
               <div className="space-y-3">
                 <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                   <span className="text-3xl">🏦</span>
@@ -1183,7 +1230,7 @@ export default function Home() {
                   Log In
                 </button>
               </div>
-            ) : wallets.length === 0 ? (
+            ) : !backendWallet && wallets.length === 0 ? (
               <div className="space-y-3">
                 <div className="w-16 h-16 bg-gold-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                   <span className="text-3xl">🏦</span>
