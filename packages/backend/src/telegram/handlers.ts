@@ -843,6 +843,11 @@ export function registerHandlers(bot: Telegraf) {
 
   // Handle text messages (natural language commands)
   bot.on('text', async (ctx) => {
+    // Skip if this is a command (starts with /)
+    if (ctx.message.text.startsWith('/')) {
+      return;
+    }
+
     const telegramId = BigInt(ctx.from.id);
     const user = await getUserByTelegramId(telegramId);
 
