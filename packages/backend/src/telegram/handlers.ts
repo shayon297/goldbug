@@ -1317,10 +1317,14 @@ export function registerHandlers(bot: Telegraf) {
     try {
       const hl = await getHyperliquidClient();
 
+      console.log(`[Close] Attempting to close position for ${user.walletAddress}`);
       const result = await hl.closePosition(user.agentPrivateKey, user.walletAddress);
+      console.log(`[Close] Result:`, JSON.stringify(result, null, 2));
 
       if (result.status === 'ok') {
         const response = result.response?.data?.statuses[0];
+        console.log(`[Close] Response status:`, JSON.stringify(response, null, 2));
+        
         if (response?.filled) {
           await ctx.editMessageText(
             `✅ *Position Closed*\n\n` +
@@ -1328,8 +1332,24 @@ export function registerHandlers(bot: Telegraf) {
               `Close Price: $${response.filled.avgPx}`,
             { parse_mode: 'Markdown', ...mainMenuKeyboard() }
           );
+        } else if (response?.resting) {
+          // Order is resting (limit order waiting to fill)
+          await ctx.editMessageText(
+            `📝 *Close Order Placed*\n\n` +
+              `Order #${response.resting.oid} waiting to fill.\n` +
+              `Check /orders to see status.`,
+            { parse_mode: 'Markdown', ...mainMenuKeyboard() }
+          );
+        } else if (response?.error) {
+          await ctx.editMessageText(`❌ Close failed: ${response.error}`, mainMenuKeyboard());
         } else {
-          await ctx.editMessageText('Position closed.', mainMenuKeyboard());
+          // Fallback - check if position is actually closed
+          const position = await hl.getGoldPosition(user.walletAddress);
+          if (!position || parseFloat(position.position.szi) === 0) {
+            await ctx.editMessageText('✅ Position closed.', mainMenuKeyboard());
+          } else {
+            await ctx.editMessageText('⚠️ Close order submitted. Check /status to verify.', mainMenuKeyboard());
+          }
         }
       } else {
         const errorMsg = result.error || 'Unknown error';

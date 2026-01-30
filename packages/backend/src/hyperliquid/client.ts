@@ -460,6 +460,8 @@ export class HyperliquidClient {
       throw new Error('Close size too small');
     }
 
+    console.log(`[Hyperliquid] Closing position: size=${closeSize}, wallet=${walletAddress}`);
+
     try {
       const result = await this.signerRequest<OrderResult>('/l1/market_close', {
         agent_private_key: agentPrivateKey,
@@ -469,14 +471,18 @@ export class HyperliquidClient {
         slippage: SLIPPAGE_BPS / 10000,
       });
 
+      console.log(`[Hyperliquid] Close result:`, JSON.stringify(result, null, 2));
+
       if (result.status === 'ok') {
         return { status: 'ok', response: result.response as any };
       } else {
         const errorMsg = typeof result.response === 'string' ? result.response : JSON.stringify(result.response);
+        console.log(`[Hyperliquid] Close failed:`, errorMsg);
         return { status: 'err', error: errorMsg || 'Close failed' };
       }
     } catch (e: any) {
       const errorMsg = e.response?.data?.response || e.message || 'Unknown error';
+      console.log(`[Hyperliquid] Close exception:`, errorMsg);
       return { status: 'err', error: errorMsg };
     }
   }
