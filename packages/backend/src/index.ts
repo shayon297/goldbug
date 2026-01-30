@@ -156,7 +156,7 @@ async function main() {
   
   app.get('/api/onramper-url', async (req: Request, res: Response) => {
     try {
-      const { walletAddress, mode } = req.query;
+      const { walletAddress, mode, skipSign } = req.query;
       
       if (!walletAddress || typeof walletAddress !== 'string') {
         res.status(400).json({ error: 'walletAddress is required' });
@@ -166,6 +166,7 @@ async function main() {
       const onrampMode = mode === 'sell' ? 'sell' : 'buy';
       
       // Build the base URL with parameters
+      // See: https://docs.onramper.com/docs/supported-widget-parameters
       const params = new URLSearchParams({
         apiKey: ONRAMPER_API_KEY,
         mode: onrampMode,
@@ -186,19 +187,30 @@ async function main() {
       
       const baseUrl = `https://buy.onramper.com/?${params.toString()}`;
       
-      // If we have a signing secret, sign the URL
-      if (ONRAMPER_SIGNING_SECRET) {
+      // According to Onramper docs (https://docs.onramper.com/docs/signing-widget-url):
+      // Widget URL signing is OPTIONAL unless you enable "Signature required" in dashboard
+      // If enabled, signature = HMAC-SHA256(signing_secret, query_string_without_signature)
+      
+      // Allow skipping signature for debugging
+      const shouldSign = ONRAMPER_SIGNING_SECRET && skipSign !== 'true';
+      
+      if (shouldSign) {
         const crypto = await import('crypto');
+        // Sign just the query string (the part after ?)
+        const queryString = params.toString();
         const signature = crypto
           .createHmac('sha256', ONRAMPER_SIGNING_SECRET)
-          .update(params.toString())
+          .update(queryString)
           .digest('hex');
         
         const signedUrl = `${baseUrl}&signature=${signature}`;
         console.log('[Onramper] Generated signed URL for wallet:', walletAddress);
+        console.log('[Onramper] Query string to sign:', queryString.substring(0, 100) + '...');
+        console.log('[Onramper] Signature:', signature);
         res.json({ url: signedUrl, signed: true });
       } else {
-        console.log('[Onramper] No signing secret, using unsigned URL');
+        // Widget works without signature unless "Signature required" is enabled in dashboard
+        console.log('[Onramper] Using unsigned URL for wallet:', walletAddress);
         res.json({ url: baseUrl, signed: false });
       }
     } catch (error) {
