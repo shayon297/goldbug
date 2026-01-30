@@ -13,7 +13,8 @@ async function broadcastChart(bot: Telegraf): Promise<void> {
   
   try {
     const hl = await getHyperliquidClient();
-    const candles = await hl.getCandles('4h', 100);
+    // 5-minute candles x 48 = 4 hours of data
+    const candles = await hl.getCandles('5m', 48);
     
     if (candles.length === 0) {
       console.log('[Scheduler] No candle data available, skipping broadcast');
@@ -23,7 +24,7 @@ async function broadcastChart(bot: Telegraf): Promise<void> {
     const chartBuffer = await generateChartBuffer({
       candles,
       symbol: TRADING_ASSET,
-      interval: '4H',
+      interval: '5m',
     });
 
     const summary = generateChartSummary(candles, TRADING_ASSET);

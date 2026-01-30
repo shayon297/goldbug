@@ -1,4 +1,4 @@
-import { Context, Telegraf } from 'telegraf';
+import { Context, Telegraf, Markup } from 'telegraf';
 import { ethers, Contract } from 'ethers';
 import {
   mainMenuKeyboard,
@@ -296,17 +296,15 @@ export function registerHandlers(bot: Telegraf) {
       `/short - Open a short position\n` +
       `/close - Close your position\n` +
       `/status - Balance, position & orders\n` +
-      `/price - Current price\n\n` +
+      `/chart - Price chart with indicators\n\n` +
       `*Funding:*\n` +
-      `/fund - Add or withdraw funds\n` +
-      `/onramp - Buy USDC with card/bank\n` +
-      `/withdraw - Sell USDC to bank\n` +
-      `/bridge - Bridge USDC to Hyperliquid\n\n` +
+      `/fund - Add or withdraw funds\n\n` +
       `*Quick Trade Examples:*\n` +
       `• \`/long $100 5x\`\n` +
       `• \`/short $500 10x market\`\n` +
       `• \`Long 5x $250 limit 2800\`\n\n` +
-      `💡 Just type naturally - no need for exact syntax!`
+      `💡 Just type naturally - no need for exact syntax!`,
+      mainMenuKeyboard()
     );
   });
 
@@ -355,27 +353,35 @@ export function registerHandlers(bot: Telegraf) {
     );
   });
 
-  // /price command
+  // /price command - show price with trading CTA
   bot.command('price', async (ctx) => {
     try {
       const hl = await getHyperliquidClient();
       const price = await hl.getGoldPrice();
       await ctx.replyWithMarkdown(
-        `💲 *${TRADING_ASSET}*: $${price.toFixed(2)}`,
-        mainMenuKeyboard()
+        `💲 *${TRADING_ASSET}*: $${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n` +
+        `Ready to trade?`,
+        Markup.inlineKeyboard([
+          [
+            Markup.button.callback('📈 Long', 'action:long'),
+            Markup.button.callback('📉 Short', 'action:short'),
+          ],
+          [Markup.button.callback('📊 View Chart', 'action:chart')],
+        ])
       );
     } catch (error) {
-      await ctx.reply('Error fetching price. Please try again.');
+      await ctx.reply('Error fetching price. Please try again.', mainMenuKeyboard());
     }
   });
 
-  // /chart command - generate price chart with indicators
+  // /chart command - generate price chart (4h view, TradingView style)
   bot.command('chart', async (ctx) => {
     try {
       await ctx.reply('📊 Generating chart...');
       
       const hl = await getHyperliquidClient();
-      const candles = await hl.getCandles('4h', 100);
+      // 5-minute candles x 48 = 4 hours of data
+      const candles = await hl.getCandles('5m', 48);
       
       if (candles.length === 0) {
         await ctx.reply('No chart data available. Please try again later.');
@@ -385,7 +391,7 @@ export function registerHandlers(bot: Telegraf) {
       const chartBuffer = await generateChartBuffer({
         candles,
         symbol: TRADING_ASSET,
-        interval: '4H',
+        interval: '5m',
       });
 
       const summary = generateChartSummary(candles, TRADING_ASSET);
@@ -958,6 +964,9 @@ export function registerHandlers(bot: Telegraf) {
         break;
       case 'cancel':
         await handleCancel(ctx);
+        break;
+      case 'chart':
+        await handleChart(ctx);
         break;
     }
   });
@@ -1644,6 +1653,39 @@ async function handleDetails(ctx: Context) {
     });
   } catch (error) {
     await ctx.editMessageText('Error loading details. Please try again.', mainMenuKeyboard());
+  }
+}
+
+async function handleChart(ctx: Context) {
+  try {
+    await ctx.answerCbQuery('Generating chart...');
+    
+    const hl = await getHyperliquidClient();
+    const candles = await hl.getCandles('4h', 100);
+    
+    if (candles.length === 0) {
+      await ctx.reply('No chart data available. Please try again later.');
+      return;
+    }
+
+    const chartBuffer = await generateChartBuffer({
+      candles,
+      symbol: TRADING_ASSET,
+      interval: '4H',
+    });
+
+    const summary = generateChartSummary(candles, TRADING_ASSET);
+
+    await ctx.replyWithPhoto(
+      { source: chartBuffer },
+      {
+        caption: summary,
+        parse_mode: 'Markdown',
+      }
+    );
+  } catch (error) {
+    console.error('[Chart] Error generating chart:', error);
+    await ctx.reply('Error generating chart. Please try again later.', mainMenuKeyboard());
   }
 }
 
