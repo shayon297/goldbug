@@ -7,7 +7,7 @@ import { Markup } from 'telegraf';
 // Connect wallet button (opens Mini App)
 export function connectWalletKeyboard(miniAppUrl: string) {
   return Markup.inlineKeyboard([
-    [Markup.button.webApp('🔗 Connect Wallet', miniAppUrl)],
+    [Markup.button.webApp('🚀 Start Trading', miniAppUrl)],
   ]);
 }
 

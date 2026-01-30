@@ -182,12 +182,22 @@ export function registerHandlers(bot: Telegraf) {
     const deepLink = parseDeepLink(payload);
 
     if (!exists) {
-      // New user - show welcome with connect wallet
-      // TODO: Store referral attribution if present in deep link
+      // New user - compelling welcome for gold CFD traders
       await ctx.replyWithMarkdown(
-        `🥇 *Trade ${TRADING_ASSET} on Hyperliquid*\n\n` +
-          `Up to 20x leverage • Market & Limit orders • Gasless trading\n\n` +
-          `⏱️ Setup takes ~30 seconds`,
+        `🥇 *Trade Gold. Keep Your Edge.*\n\n` +
+        `Tired of MT4 spreads eating your profits?\n\n` +
+        `Goldbug gives you:\n` +
+        `• *0.01% fees* (vs 0.5%+ on MT4/MT5)\n` +
+        `• *Up to 20x leverage* on gold\n` +
+        `• *No broker* — trade directly on-chain\n` +
+        `• *Instant withdrawals* — your money, your keys\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `*Setup in 4 steps:*\n\n` +
+        `1️⃣ Create wallet (30 sec)\n` +
+        `2️⃣ Fund with card or crypto\n` +
+        `3️⃣ Bridge to Hyperliquid\n` +
+        `4️⃣ Trade gold\n\n` +
+        `👇 *Tap below to start*`,
         connectWalletKeyboard(MINIAPP_URL)
       );
       return;
@@ -290,20 +300,20 @@ export function registerHandlers(bot: Telegraf) {
   // /help command
   bot.command('help', async (ctx) => {
     await ctx.replyWithMarkdown(
-      `🥇 *${TRADING_ASSET} Trade Bot*\n\n` +
-      `*Trading:*\n` +
-      `/long - Open a long position\n` +
-      `/short - Open a short position\n` +
-      `/close - Close your position\n` +
-      `/status - Balance, position & orders\n` +
-      `/chart - Price chart with indicators\n\n` +
-      `*Funding:*\n` +
-      `/fund - Add or withdraw funds\n\n` +
-      `*Quick Trade Examples:*\n` +
-      `• \`/long $100 5x\`\n` +
-      `• \`/short $500 10x market\`\n` +
-      `• \`Long 5x $250 limit 2800\`\n\n` +
-      `💡 Just type naturally - no need for exact syntax!`,
+      `🥇 *Goldbug Commands*\n\n` +
+      `*Trade:*\n` +
+      `\`/long $100 5x\` — Go long\n` +
+      `\`/short $50 10x\` — Go short\n` +
+      `\`/close\` — Close position\n\n` +
+      `*Monitor:*\n` +
+      `\`/status\` — Balance & position\n` +
+      `\`/chart\` — Price chart\n\n` +
+      `*Fund:*\n` +
+      `\`/fund\` — Buy or bridge USDC\n\n` +
+      `*Earn Points:*\n` +
+      `Share your trades → Earn ⭐ points\n` +
+      `Points unlock future bonuses & discounts\n\n` +
+      `💡 _Type naturally: "long 100 5x" works too!_`,
       mainMenuKeyboard()
     );
   });
