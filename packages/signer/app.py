@@ -160,14 +160,13 @@ def market_open(req: MarketOrderRequest, x_signer_api_key: Optional[str] = Heade
 def market_close(req: MarketCloseRequest, x_signer_api_key: Optional[str] = Header(default=None)):
     require_api_key(x_signer_api_key)
     exchange = get_exchange(req.agent_private_key, req.wallet_address)
-    builder = get_builder()
-    print(f"[market_close] name={req.coin}, size={req.size}, slippage={req.slippage}, builder={builder}")
+    # No builder fee on close orders - only on opens
+    print(f"[market_close] coin={req.coin}, size={req.size}, slippage={req.slippage}")
     result = exchange.market_close(
-        name=req.coin,  # SDK uses 'name' not 'coin' (same as market_open)
+        coin=req.coin,
         sz=req.size,
         px=req.px,
         slippage=req.slippage,
-        builder=builder,
     )
     print(f"[market_close] result: {result}")
     return result

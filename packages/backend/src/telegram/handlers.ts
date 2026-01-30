@@ -1691,7 +1691,8 @@ async function handleChart(ctx: Context) {
     await ctx.answerCbQuery('Generating chart...');
     
     const hl = await getHyperliquidClient();
-    const candles = await hl.getCandles('4h', 100);
+    // 5-minute candles x 48 = 4 hours of data
+    const candles = await hl.getCandles('5m', 48);
     
     if (candles.length === 0) {
       await ctx.reply('No chart data available. Please try again later.');
@@ -1701,7 +1702,7 @@ async function handleChart(ctx: Context) {
     const chartBuffer = await generateChartBuffer({
       candles,
       symbol: TRADING_ASSET,
-      interval: '4H',
+      interval: '5m',
     });
 
     const summary = generateChartSummary(candles, TRADING_ASSET);
