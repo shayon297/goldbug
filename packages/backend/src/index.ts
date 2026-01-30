@@ -108,7 +108,7 @@ async function main() {
         
         console.log(`[Onramper] Transaction completed: ${fiatAmount} ${fiatCurrency} → ${cryptoAmount} ${cryptoCurrency} to ${walletAddress}`);
         
-        // Find user by wallet address and notify them
+        // Find user by wallet address and notify them with bridge prompt
         if (walletAddress) {
           const user = await prisma.user.findFirst({
             where: { walletAddress: walletAddress.toLowerCase() },
@@ -116,14 +116,23 @@ async function main() {
           
           if (user) {
             try {
+              // Send notification with bridge button
               await bot.telegram.sendMessage(
                 Number(user.telegramId),
                 `✅ *USDC Purchase Complete!*\n\n` +
                 `💵 You bought: ${cryptoAmount} ${cryptoCurrency}\n` +
                 `💳 Paid: ${fiatAmount} ${fiatCurrency}\n\n` +
                 `Your USDC is now on Arbitrum.\n` +
-                `Use /fund → Bridge to move it to Hyperliquid for trading.`,
-                { parse_mode: 'Markdown' }
+                `👇 *Bridge to Hyperliquid to start trading:*`,
+                { 
+                  parse_mode: 'Markdown',
+                  reply_markup: {
+                    inline_keyboard: [
+                      [{ text: '🌉 Bridge Now', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+                      [{ text: '📈 Long', callback_data: 'action:long' }, { text: '📉 Short', callback_data: 'action:short' }],
+                    ],
+                  },
+                }
               );
             } catch (err) {
               console.error('[Onramper] Failed to notify user:', err);
