@@ -92,6 +92,55 @@ async function main() {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
+  // Onramper webhook - receives notifications when users complete purchases
+  const ONRAMPER_WEBHOOK_SECRET = process.env.ONRAMPER_WEBHOOK_SECRET || '';
+  
+  app.post('/api/webhooks/onramper', async (req: Request, res: Response) => {
+    try {
+      // Log the webhook for debugging
+      console.log('[Onramper Webhook] Received:', JSON.stringify(req.body, null, 2));
+      
+      const { type, payload } = req.body;
+      
+      // Handle different event types
+      if (type === 'transaction_completed' || type === 'TRANSACTION_COMPLETED') {
+        const { walletAddress, cryptoAmount, cryptoCurrency, fiatAmount, fiatCurrency, txId } = payload || {};
+        
+        console.log(`[Onramper] Transaction completed: ${fiatAmount} ${fiatCurrency} → ${cryptoAmount} ${cryptoCurrency} to ${walletAddress}`);
+        
+        // Find user by wallet address and notify them
+        if (walletAddress) {
+          const user = await prisma.user.findFirst({
+            where: { walletAddress: walletAddress.toLowerCase() },
+          });
+          
+          if (user) {
+            try {
+              await bot.telegram.sendMessage(
+                Number(user.telegramId),
+                `✅ *USDC Purchase Complete!*\n\n` +
+                `💵 You bought: ${cryptoAmount} ${cryptoCurrency}\n` +
+                `💳 Paid: ${fiatAmount} ${fiatCurrency}\n\n` +
+                `Your USDC is now on Arbitrum.\n` +
+                `Use /fund → Bridge to move it to Hyperliquid for trading.`,
+                { parse_mode: 'Markdown' }
+              );
+            } catch (err) {
+              console.error('[Onramper] Failed to notify user:', err);
+            }
+          }
+        }
+      }
+      
+      // Always respond 200 to acknowledge receipt
+      res.status(200).json({ received: true });
+    } catch (error) {
+      console.error('[Onramper Webhook] Error:', error);
+      // Still return 200 to prevent retries
+      res.status(200).json({ received: true, error: 'Processing failed' });
+    }
+  });
+
   // GOLD price endpoint (public)
   app.get('/api/price', async (req, res) => {
     try {
