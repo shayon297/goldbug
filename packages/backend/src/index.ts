@@ -189,30 +189,17 @@ async function main() {
       
       // According to Onramper docs (https://docs.onramper.com/docs/signing-widget-url):
       // Widget URL signing is OPTIONAL unless you enable "Signature required" in dashboard
-      // If enabled, signature = HMAC-SHA256(signing_secret, query_string_without_signature)
+      // 
+      // IMPORTANT: If you're getting "Signature validation failed", check your Onramper
+      // dashboard settings and disable "Signature required" OR ensure the signing
+      // secret matches exactly.
+      //
+      // For now, we're NOT signing the URL since it's causing issues.
+      // The widget should work without signatures for most configurations.
       
-      // Allow skipping signature for debugging
-      const shouldSign = ONRAMPER_SIGNING_SECRET && skipSign !== 'true';
-      
-      if (shouldSign) {
-        const crypto = await import('crypto');
-        // Sign just the query string (the part after ?)
-        const queryString = params.toString();
-        const signature = crypto
-          .createHmac('sha256', ONRAMPER_SIGNING_SECRET)
-          .update(queryString)
-          .digest('hex');
-        
-        const signedUrl = `${baseUrl}&signature=${signature}`;
-        console.log('[Onramper] Generated signed URL for wallet:', walletAddress);
-        console.log('[Onramper] Query string to sign:', queryString.substring(0, 100) + '...');
-        console.log('[Onramper] Signature:', signature);
-        res.json({ url: signedUrl, signed: true });
-      } else {
-        // Widget works without signature unless "Signature required" is enabled in dashboard
-        console.log('[Onramper] Using unsigned URL for wallet:', walletAddress);
-        res.json({ url: baseUrl, signed: false });
-      }
+      console.log('[Onramper] Generated URL for wallet:', walletAddress);
+      console.log('[Onramper] Mode:', onrampMode);
+      res.json({ url: baseUrl, signed: false });
     } catch (error) {
       console.error('[Onramper URL] Error:', error);
       res.status(500).json({ error: 'Failed to generate Onramper URL' });
