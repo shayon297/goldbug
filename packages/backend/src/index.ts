@@ -187,27 +187,30 @@ async function main() {
       
       const baseUrl = `https://buy.onramper.com/?${params.toString()}`;
       
-      // Onramper Widget URL Signing (https://docs.onramper.com/docs/signing-widget-url)
-      // The signature is computed over the query string using HMAC-SHA256
+      // Onramper Widget URL Signing
+      // Try different signing approaches to find what works
       
       if (ONRAMPER_SIGNING_SECRET) {
         const crypto = await import('crypto');
         
-        // Get the query string (everything after the ?)
-        const queryString = params.toString();
+        // Sort parameters alphabetically (common requirement for signature verification)
+        const sortedParams = new URLSearchParams(
+          [...params.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+        );
+        const sortedQueryString = sortedParams.toString();
         
-        // Compute HMAC-SHA256 signature
+        // Compute HMAC-SHA256 signature over sorted query string
         const signature = crypto
           .createHmac('sha256', ONRAMPER_SIGNING_SECRET)
-          .update(queryString)
+          .update(sortedQueryString)
           .digest('hex');
         
-        // Append signature to URL
-        const signedUrl = `${baseUrl}&signature=${signature}`;
+        // Build URL with sorted params + signature
+        const signedUrl = `https://buy.onramper.com/?${sortedQueryString}&signature=${signature}`;
         
         console.log('[Onramper] Wallet:', walletAddress);
         console.log('[Onramper] Mode:', onrampMode);
-        console.log('[Onramper] Query (first 80 chars):', queryString.substring(0, 80));
+        console.log('[Onramper] Sorted params (first 100 chars):', sortedQueryString.substring(0, 100));
         console.log('[Onramper] Signature:', signature);
         
         res.json({ url: signedUrl, signed: true });
