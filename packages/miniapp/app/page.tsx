@@ -736,20 +736,29 @@ export default function Home() {
     
     console.log('[MiniApp] Onramper URL for wallet:', walletAddress);
     
+    if (!walletAddress) {
+      console.error('[MiniApp] No wallet address available for onramp!');
+    }
+    
     const params = new URLSearchParams({
       apiKey: ONRAMPER_API_KEY,
       mode: mode,
+      // Crypto settings - only USDC on Arbitrum
       defaultCrypto: 'usdc_arbitrum',
       onlyCryptos: 'usdc_arbitrum',
+      onlyNetworks: 'arbitrum',
+      // Wallet - locked to user's registered wallet
       networkWallets: `arbitrum:${walletAddress}`,
+      walletAddressLocked: 'true', // Prevent user from changing wallet
+      // Theme
       themeName: 'dark',
-      containerColor: '18181bff', // zinc-900
-      primaryColor: 'f59e0bff', // amber-500
-      secondaryColor: '3f3f46ff', // zinc-700
-      cardColor: '27272aff', // zinc-800
-      primaryTextColor: 'ffffffff', // white (fixed typo)
-      secondaryTextColor: 'a1a1aaff', // zinc-400
-      borderRadius: '0.75', // rounded-lg
+      containerColor: '18181bff',
+      primaryColor: 'f59e0bff',
+      secondaryColor: '3f3f46ff',
+      cardColor: '27272aff',
+      primaryTextColor: 'ffffffff',
+      secondaryTextColor: 'a1a1aaff',
+      borderRadius: '0.75',
     });
 
     return `https://buy.onramper.com/?${params.toString()}`;
@@ -1182,6 +1191,22 @@ export default function Home() {
                   Return to Telegram
                 </button>
               </div>
+            ) : !backendWallet ? (
+              <div className="space-y-3">
+                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">⚠️</span>
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Wallet Not Found</h2>
+                <p className="text-zinc-400 text-sm mb-4">
+                  Please set up your wallet first by going to /start in the bot.
+                </p>
+                <button 
+                  onClick={() => closeMiniApp()} 
+                  className="w-full bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm transition"
+                >
+                  Return to Telegram
+                </button>
+              </div>
             ) : (
               <div className="w-full -mx-6 -mb-6">
                 <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
@@ -1193,10 +1218,15 @@ export default function Home() {
                     ✕ Close
                   </button>
                 </div>
+                {/* Show wallet address so user knows where USDC will go */}
+                <div className="bg-zinc-800/80 px-4 py-2 border-b border-zinc-700">
+                  <p className="text-xs text-zinc-400">Sending to your wallet:</p>
+                  <p className="text-xs font-mono text-zinc-300 truncate">{backendWallet}</p>
+                </div>
                 <iframe
                   src={getOnramperUrl('buy')}
                   className="w-full border-0"
-                  style={{ height: 'calc(100vh - 120px)', minHeight: '500px' }}
+                  style={{ height: 'calc(100vh - 160px)', minHeight: '500px' }}
                   allow="accelerometer; autoplay; camera; gyroscope; payment"
                   title="Buy USDC with Onramper"
                 />
@@ -1262,6 +1292,22 @@ export default function Home() {
                   Return to Telegram
                 </button>
               </div>
+            ) : !backendWallet ? (
+              <div className="space-y-3">
+                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <span className="text-3xl">⚠️</span>
+                </div>
+                <h2 className="text-xl font-semibold mb-2">Wallet Not Found</h2>
+                <p className="text-zinc-400 text-sm mb-4">
+                  Please set up your wallet first by going to /start in the bot.
+                </p>
+                <button 
+                  onClick={() => closeMiniApp()} 
+                  className="w-full bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm transition"
+                >
+                  Return to Telegram
+                </button>
+              </div>
             ) : (
               <div className="w-full -mx-6 -mb-6">
                 <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
@@ -1273,6 +1319,11 @@ export default function Home() {
                     ✕ Close
                   </button>
                 </div>
+                {/* Show wallet address */}
+                <div className="bg-zinc-800/80 px-4 py-2 border-b border-zinc-700">
+                  <p className="text-xs text-zinc-400">Selling from your wallet:</p>
+                  <p className="text-xs font-mono text-zinc-300 truncate">{backendWallet}</p>
+                </div>
                 <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2">
                   <p className="text-amber-400 text-xs">
                     ⚠️ To sell, your USDC must be on Arbitrum. Withdraw from Hyperliquid first if needed.
@@ -1281,7 +1332,7 @@ export default function Home() {
                 <iframe
                   src={getOnramperUrl('sell')}
                   className="w-full border-0"
-                  style={{ height: 'calc(100vh - 160px)', minHeight: '500px' }}
+                  style={{ height: 'calc(100vh - 200px)', minHeight: '500px' }}
                   allow="accelerometer; autoplay; camera; gyroscope; payment"
                   title="Sell USDC with Onramper"
                 />
