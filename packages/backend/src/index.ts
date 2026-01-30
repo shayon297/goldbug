@@ -150,6 +150,63 @@ async function main() {
     }
   });
 
+  // Generate signed Onramper URL
+  const ONRAMPER_SIGNING_SECRET = process.env.ONRAMPER_SIGNING_SECRET || '';
+  const ONRAMPER_API_KEY = process.env.ONRAMPER_API_KEY || '';
+  
+  app.get('/api/onramper-url', async (req: Request, res: Response) => {
+    try {
+      const { walletAddress, mode } = req.query;
+      
+      if (!walletAddress || typeof walletAddress !== 'string') {
+        res.status(400).json({ error: 'walletAddress is required' });
+        return;
+      }
+      
+      const onrampMode = mode === 'sell' ? 'sell' : 'buy';
+      
+      // Build the base URL with parameters
+      const params = new URLSearchParams({
+        apiKey: ONRAMPER_API_KEY,
+        mode: onrampMode,
+        defaultCrypto: 'usdc_arbitrum',
+        onlyCryptos: 'usdc_arbitrum',
+        onlyNetworks: 'arbitrum',
+        networkWallets: `arbitrum:${walletAddress}`,
+        walletAddressLocked: 'true',
+        themeName: 'dark',
+        containerColor: '18181bff',
+        primaryColor: 'f59e0bff',
+        secondaryColor: '3f3f46ff',
+        cardColor: '27272aff',
+        primaryTextColor: 'ffffffff',
+        secondaryTextColor: 'a1a1aaff',
+        borderRadius: '0.75',
+      });
+      
+      const baseUrl = `https://buy.onramper.com/?${params.toString()}`;
+      
+      // If we have a signing secret, sign the URL
+      if (ONRAMPER_SIGNING_SECRET) {
+        const crypto = await import('crypto');
+        const signature = crypto
+          .createHmac('sha256', ONRAMPER_SIGNING_SECRET)
+          .update(params.toString())
+          .digest('hex');
+        
+        const signedUrl = `${baseUrl}&signature=${signature}`;
+        console.log('[Onramper] Generated signed URL for wallet:', walletAddress);
+        res.json({ url: signedUrl, signed: true });
+      } else {
+        console.log('[Onramper] No signing secret, using unsigned URL');
+        res.json({ url: baseUrl, signed: false });
+      }
+    } catch (error) {
+      console.error('[Onramper URL] Error:', error);
+      res.status(500).json({ error: 'Failed to generate Onramper URL' });
+    }
+  });
+
   // GOLD price endpoint (public)
   app.get('/api/price', async (req, res) => {
     try {

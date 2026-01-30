@@ -726,43 +726,50 @@ export default function Home() {
     setStep('bridge');
   }, [fetchBalances]);
 
-  // Generate Onramper widget URL
-  // Prioritize backendWallet (existing user) over Privy wallet
-  const getOnramperUrl = useCallback((mode: 'buy' | 'sell') => {
-    // Use backend wallet if available (no Privy re-auth needed)
-    // Otherwise fall back to Privy embedded wallet
-    const embeddedWallet = wallets.find((w) => w.walletClientType === 'privy');
-    const walletAddress = backendWallet || embeddedWallet?.address || wallets[0]?.address || '';
-    
-    console.log('[MiniApp] Onramper URL for wallet:', walletAddress);
+  // State for signed Onramper URL (fetched from backend)
+  const [onramperUrl, setOnramperUrl] = useState<string | null>(null);
+  const [onramperLoading, setOnramperLoading] = useState(false);
+  
+  // Fetch signed Onramper URL from backend
+  const fetchOnramperUrl = useCallback(async (mode: 'buy' | 'sell') => {
+    const walletAddress = backendWallet;
     
     if (!walletAddress) {
       console.error('[MiniApp] No wallet address available for onramp!');
+      return null;
     }
     
-    const params = new URLSearchParams({
-      apiKey: ONRAMPER_API_KEY,
-      mode: mode,
-      // Crypto settings - only USDC on Arbitrum
-      defaultCrypto: 'usdc_arbitrum',
-      onlyCryptos: 'usdc_arbitrum',
-      onlyNetworks: 'arbitrum',
-      // Wallet - locked to user's registered wallet
-      networkWallets: `arbitrum:${walletAddress}`,
-      walletAddressLocked: 'true', // Prevent user from changing wallet
-      // Theme
-      themeName: 'dark',
-      containerColor: '18181bff',
-      primaryColor: 'f59e0bff',
-      secondaryColor: '3f3f46ff',
-      cardColor: '27272aff',
-      primaryTextColor: 'ffffffff',
-      secondaryTextColor: 'a1a1aaff',
-      borderRadius: '0.75',
-    });
-
-    return `https://buy.onramper.com/?${params.toString()}`;
-  }, [wallets, backendWallet]);
+    setOnramperLoading(true);
+    
+    try {
+      console.log('[MiniApp] Fetching signed Onramper URL for wallet:', walletAddress);
+      const response = await fetch(`${API_URL}/api/onramper-url?walletAddress=${walletAddress}&mode=${mode}`);
+      
+      if (!response.ok) {
+        console.error('[MiniApp] Failed to get Onramper URL:', response.status);
+        return null;
+      }
+      
+      const data = await response.json();
+      console.log('[MiniApp] Got Onramper URL, signed:', data.signed);
+      setOnramperUrl(data.url);
+      return data.url;
+    } catch (err) {
+      console.error('[MiniApp] Error fetching Onramper URL:', err);
+      return null;
+    } finally {
+      setOnramperLoading(false);
+    }
+  }, [backendWallet]);
+  
+  // Fetch Onramper URL when entering onramp/offramp step
+  useEffect(() => {
+    if (step === 'onramp' && backendWallet && !onramperUrl && !onramperLoading) {
+      fetchOnramperUrl('buy');
+    } else if (step === 'offramp' && backendWallet && !onramperUrl && !onramperLoading) {
+      fetchOnramperUrl('sell');
+    }
+  }, [step, backendWallet, onramperUrl, onramperLoading, fetchOnramperUrl]);
 
   // Handle bridge execution - tries gas sponsorship, falls back to gas drip
   const handleBridge = useCallback(async () => {
@@ -1102,7 +1109,7 @@ export default function Home() {
               
               <div className="space-y-2">
                 <button
-                  onClick={() => setStep('onramp')}
+                  onClick={() => { setOnramperUrl(null); setStep('onramp'); }}
                   className="w-full bg-green-600 hover:bg-green-500 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition flex items-center justify-center gap-2"
                 >
                   💳 Buy USDC
@@ -1116,7 +1123,7 @@ export default function Home() {
                 </button>
                 
                 <button
-                  onClick={() => setStep('offramp')}
+                  onClick={() => { setOnramperUrl(null); setStep('offramp'); }}
                   className="w-full bg-zinc-600 hover:bg-zinc-500 text-white py-2 px-4 rounded-lg font-semibold text-sm text-center transition flex items-center justify-center gap-2"
                 >
                   🏦 Withdraw to Bank
@@ -1207,6 +1214,11 @@ export default function Home() {
                   Return to Telegram
                 </button>
               </div>
+            ) : onramperLoading || !onramperUrl ? (
+              <div className="space-y-3">
+                <div className="spinner mx-auto mb-4" />
+                <p className="text-zinc-400">Loading payment options...</p>
+              </div>
             ) : (
               <div className="w-full -mx-6 -mb-6">
                 <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
@@ -1224,7 +1236,7 @@ export default function Home() {
                   <p className="text-xs font-mono text-zinc-300 truncate">{backendWallet}</p>
                 </div>
                 <iframe
-                  src={getOnramperUrl('buy')}
+                  src={onramperUrl}
                   className="w-full border-0"
                   style={{ height: 'calc(100vh - 160px)', minHeight: '500px' }}
                   allow="accelerometer; autoplay; camera; gyroscope; payment"
@@ -1308,6 +1320,11 @@ export default function Home() {
                   Return to Telegram
                 </button>
               </div>
+            ) : onramperLoading || !onramperUrl ? (
+              <div className="space-y-3">
+                <div className="spinner mx-auto mb-4" />
+                <p className="text-zinc-400">Loading payment options...</p>
+              </div>
             ) : (
               <div className="w-full -mx-6 -mb-6">
                 <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800">
@@ -1330,7 +1347,7 @@ export default function Home() {
                   </p>
                 </div>
                 <iframe
-                  src={getOnramperUrl('sell')}
+                  src={onramperUrl}
                   className="w-full border-0"
                   style={{ height: 'calc(100vh - 200px)', minHeight: '500px' }}
                   allow="accelerometer; autoplay; camera; gyroscope; payment"
