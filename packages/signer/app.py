@@ -158,13 +158,16 @@ def market_close(req: MarketCloseRequest, x_signer_api_key: Optional[str] = Head
     require_api_key(x_signer_api_key)
     exchange = get_exchange(req.agent_private_key, req.wallet_address)
     builder = get_builder()
-    return exchange.market_close(
+    print(f"[market_close] coin={req.coin}, size={req.size}, slippage={req.slippage}, builder={builder}")
+    result = exchange.market_close(
         coin=req.coin,
         sz=req.size,
         px=req.px,
         slippage=req.slippage,
         builder=builder,
     )
+    print(f"[market_close] result: {result}")
+    return result
 
 
 @app.post("/l1/cancel")
