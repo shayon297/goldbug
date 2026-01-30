@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { usePrivy, useWallets, useFundWallet, useSendTransaction } from '@privy-io/react-auth';
+import { usePrivy, useWallets, useFundWallet, useSendTransaction, useCreateWallet } from '@privy-io/react-auth';
 import { Wallet, ethers, Contract, formatUnits, parseUnits } from 'ethers';
 import { arbitrum } from 'viem/chains';
 import {
@@ -42,6 +42,7 @@ export default function Home() {
   const { wallets } = useWallets();
   const { fundWallet } = useFundWallet();
   const { sendTransaction } = useSendTransaction();
+  const { createWallet } = useCreateWallet();
 
   const [step, setStep] = useState<Step>('init');
   const [error, setError] = useState<string | null>(null);
@@ -147,6 +148,27 @@ export default function Home() {
       console.log('[MiniApp] External browser funding mode - skipping Telegram check');
     }
   }, []);
+
+  // Auto-create wallet if authenticated but no wallet exists
+  // This is needed because automatic wallet creation may not work with seamless Telegram login
+  const walletCreationAttempted = useRef(false);
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    if (wallets.length > 0) return; // Already have a wallet
+    if (walletCreationAttempted.current) return; // Already tried
+    
+    walletCreationAttempted.current = true;
+    console.log('[MiniApp] Authenticated but no wallet - creating embedded wallet...');
+    
+    createWallet()
+      .then((wallet) => {
+        console.log('[MiniApp] Wallet created:', wallet.address);
+      })
+      .catch((err) => {
+        console.error('[MiniApp] Failed to create wallet:', err);
+        // Don't set error - may already have wallet, just not loaded yet
+      });
+  }, [ready, authenticated, wallets, createWallet]);
 
   // Update step based on Privy state
   useEffect(() => {
