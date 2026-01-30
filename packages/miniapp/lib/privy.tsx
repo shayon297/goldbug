@@ -24,7 +24,7 @@ export function PrivyProviderWrapper({ children }: { children: ReactNode }) {
           accentColor: '#F59E0B',
           logo: undefined,
         },
-        loginMethods: ['telegram'],
+        loginMethods: ['telegram', 'sms', 'email'],
         embeddedWallets: {
           ethereum: {
             createOnLogin: 'users-without-wallets',
