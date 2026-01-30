@@ -143,7 +143,8 @@ def market_open(req: MarketOrderRequest, x_signer_api_key: Optional[str] = Heade
     require_api_key(x_signer_api_key)
     exchange = get_exchange(req.agent_private_key, req.wallet_address)
     builder = get_builder()
-    return exchange.market_open(
+    print(f"[market_open] name={req.coin}, is_buy={req.is_buy}, size={req.size}, slippage={req.slippage}, builder={builder}")
+    result = exchange.market_open(
         name=req.coin,
         is_buy=req.is_buy,
         sz=req.size,
@@ -151,6 +152,8 @@ def market_open(req: MarketOrderRequest, x_signer_api_key: Optional[str] = Heade
         slippage=req.slippage,
         builder=builder,
     )
+    print(f"[market_open] result: {result}")
+    return result
 
 
 @app.post("/l1/market_close")
@@ -158,9 +161,9 @@ def market_close(req: MarketCloseRequest, x_signer_api_key: Optional[str] = Head
     require_api_key(x_signer_api_key)
     exchange = get_exchange(req.agent_private_key, req.wallet_address)
     builder = get_builder()
-    print(f"[market_close] coin={req.coin}, size={req.size}, slippage={req.slippage}, builder={builder}")
+    print(f"[market_close] name={req.coin}, size={req.size}, slippage={req.slippage}, builder={builder}")
     result = exchange.market_close(
-        coin=req.coin,
+        name=req.coin,  # SDK uses 'name' not 'coin' (same as market_open)
         sz=req.size,
         px=req.px,
         slippage=req.slippage,
@@ -174,7 +177,10 @@ def market_close(req: MarketCloseRequest, x_signer_api_key: Optional[str] = Head
 def cancel(req: CancelOrderRequest, x_signer_api_key: Optional[str] = Header(default=None)):
     require_api_key(x_signer_api_key)
     exchange = get_exchange(req.agent_private_key, req.wallet_address)
-    return exchange.cancel(req.coin, req.oid)
+    print(f"[cancel] coin={req.coin}, oid={req.oid}")
+    result = exchange.cancel(req.coin, req.oid)
+    print(f"[cancel] result: {result}")
+    return result
 
 
 @app.post("/l1/enable_dex")

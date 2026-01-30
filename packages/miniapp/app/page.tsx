@@ -16,9 +16,6 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 // Builder fee configuration - address that receives trading fees
 const BUILDER_ADDRESS = process.env.NEXT_PUBLIC_BUILDER_ADDRESS || '';
-
-// Onramper widget configuration
-const ONRAMPER_API_KEY = process.env.NEXT_PUBLIC_ONRAMPER_API_KEY || '';
 const BUILDER_MAX_FEE_RATE = '0.1%'; // Maximum 0.1% for perps (10 bps)
 
 // Arbitrum USDC and Hyperliquid Bridge
@@ -200,24 +197,26 @@ export default function Home() {
       });
   }, [ready, authenticated, wallets, createWallet]);
 
-  // Update step based on Privy state
+  // Update step based on Privy state and backend wallet
   useEffect(() => {
     if (!ready) return;
     // Don't reset these steps - they should persist until user action
     if (step === 'bridge' || step === 'bridging' || step === 'bridged' || step === 'onramp' || step === 'offramp' ||
         step === 'registering' || step === 'error' || step === 'success') return;
 
-    if (authenticated && wallets.length > 0) {
+    // For onramp/offramp/bridge, we can proceed if we have a backend wallet (no Privy needed)
+    const hasWallet = wallets.length > 0 || backendWallet;
+    
+    if (hasWallet && backendChecked) {
+      // Existing user with backend wallet - can skip Privy auth for simple actions
       if (wantsFunding) {
-        // External browser funding - stay on success/loading, let auto-trigger useEffect handle it
         console.log('[MiniApp] External browser funding mode - waiting for auto-trigger');
-        // Don't change step - the other useEffect will trigger fundWallet
         return;
       } else if (wantsBridge) {
         console.log('[MiniApp] Going to bridge step');
         setStep('bridge');
       } else if (wantsOnramp) {
-        console.log('[MiniApp] Going to onramp step');
+        console.log('[MiniApp] Going to onramp step (wallet:', backendWallet || wallets[0]?.address, ')');
         setStep('onramp');
       } else if (wantsOfframp) {
         console.log('[MiniApp] Going to offramp step');
@@ -225,14 +224,15 @@ export default function Home() {
       } else if (wantsApproval || wantsBuilderFeeOnly) {
         console.log('[MiniApp] Going to authorize step for approval');
         setStep('authorize');
-      } else {
+      } else if (authenticated && wallets.length > 0) {
+        // Only go to authorize if actually authenticated with Privy
         setStep('authorize');
       }
-    } else if (!authenticated) {
-      // Go to login for any action
+    } else if (!authenticated && !backendWallet && backendChecked) {
+      // No wallet anywhere - need to login
       setStep('login');
     }
-  }, [ready, authenticated, wallets, wantsBridge, wantsApproval, wantsBuilderFeeOnly, wantsOnramp, wantsOfframp, wantsFunding, step]);
+  }, [ready, authenticated, wallets, backendWallet, backendChecked, wantsBridge, wantsApproval, wantsBuilderFeeOnly, wantsOnramp, wantsOfframp, wantsFunding, step]);
 
   // Auto-trigger funding when opened in external browser with funding action
   useEffect(() => {
@@ -1182,22 +1182,6 @@ export default function Home() {
                   Connect Wallet
                 </button>
               </div>
-            ) : !ONRAMPER_API_KEY ? (
-              <div className="space-y-3">
-                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="text-3xl">⚠️</span>
-                </div>
-                <h2 className="text-xl font-semibold mb-2">Configuration Required</h2>
-                <p className="text-zinc-400 text-sm mb-4">
-                  Onramper API key not configured. Please contact support.
-                </p>
-                <button 
-                  onClick={() => closeMiniApp()} 
-                  className="w-full bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm transition"
-                >
-                  Return to Telegram
-                </button>
-              </div>
             ) : !backendWallet ? (
               <div className="space-y-3">
                 <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -1286,22 +1270,6 @@ export default function Home() {
                   className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 px-4 rounded-lg font-semibold transition"
                 >
                   Connect Wallet
-                </button>
-              </div>
-            ) : !ONRAMPER_API_KEY ? (
-              <div className="space-y-3">
-                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="text-3xl">⚠️</span>
-                </div>
-                <h2 className="text-xl font-semibold mb-2">Configuration Required</h2>
-                <p className="text-zinc-400 text-sm mb-4">
-                  Onramper API key not configured. Please contact support.
-                </p>
-                <button 
-                  onClick={() => closeMiniApp()} 
-                  className="w-full bg-zinc-700 hover:bg-zinc-600 text-white py-2 px-4 rounded-lg font-semibold text-sm transition"
-                >
-                  Return to Telegram
                 </button>
               </div>
             ) : !backendWallet ? (
