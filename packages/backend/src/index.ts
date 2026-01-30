@@ -165,8 +165,10 @@ async function main() {
       
       const onrampMode = mode === 'sell' ? 'sell' : 'buy';
       
-      // Build the base URL with parameters
-      // See: https://docs.onramper.com/docs/supported-widget-parameters
+      // Use Onramper Quick API Integration approach
+      // This bypasses the widget and redirects directly to best onramp
+      // See: https://docs.onramper.com/docs/integration-examples#quick-api-integration
+      
       const params = new URLSearchParams({
         apiKey: ONRAMPER_API_KEY,
         mode: onrampMode,
@@ -175,49 +177,36 @@ async function main() {
         onlyNetworks: 'arbitrum',
         networkWallets: `arbitrum:${walletAddress}`,
         walletAddressLocked: 'true',
+        // Quick API approach - skip widget, go directly to best onramp
+        skipTxScreen: 'true',
+        // Theme settings (still apply to provider selection if shown)
         themeName: 'dark',
-        containerColor: '18181bff',
         primaryColor: 'f59e0bff',
-        secondaryColor: '3f3f46ff',
-        cardColor: '27272aff',
-        primaryTextColor: 'ffffffff',
-        secondaryTextColor: 'a1a1aaff',
-        borderRadius: '0.75',
       });
       
-      const baseUrl = `https://buy.onramper.com/?${params.toString()}`;
+      // Sort parameters alphabetically for signature
+      const sortedParams = new URLSearchParams(
+        [...params.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+      );
+      const sortedQueryString = sortedParams.toString();
       
-      // Onramper Widget URL Signing
-      // Try different signing approaches to find what works
-      
+      // Sign if we have a secret
+      let finalUrl: string;
       if (ONRAMPER_SIGNING_SECRET) {
         const crypto = await import('crypto');
-        
-        // Sort parameters alphabetically (common requirement for signature verification)
-        const sortedParams = new URLSearchParams(
-          [...params.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-        );
-        const sortedQueryString = sortedParams.toString();
-        
-        // Compute HMAC-SHA256 signature over sorted query string
         const signature = crypto
           .createHmac('sha256', ONRAMPER_SIGNING_SECRET)
           .update(sortedQueryString)
           .digest('hex');
         
-        // Build URL with sorted params + signature
-        const signedUrl = `https://buy.onramper.com/?${sortedQueryString}&signature=${signature}`;
-        
-        console.log('[Onramper] Wallet:', walletAddress);
-        console.log('[Onramper] Mode:', onrampMode);
-        console.log('[Onramper] Sorted params (first 100 chars):', sortedQueryString.substring(0, 100));
-        console.log('[Onramper] Signature:', signature);
-        
-        res.json({ url: signedUrl, signed: true });
+        finalUrl = `https://buy.onramper.com/?${sortedQueryString}&signature=${signature}`;
+        console.log('[Onramper API] Signed URL for:', walletAddress, 'mode:', onrampMode);
       } else {
-        console.log('[Onramper] No signing secret configured');
-        res.json({ url: baseUrl, signed: false });
+        finalUrl = `https://buy.onramper.com/?${sortedQueryString}`;
+        console.log('[Onramper API] Unsigned URL for:', walletAddress);
       }
+      
+      res.json({ url: finalUrl, signed: !!ONRAMPER_SIGNING_SECRET });
     } catch (error) {
       console.error('[Onramper URL] Error:', error);
       res.status(500).json({ error: 'Failed to generate Onramper URL' });
