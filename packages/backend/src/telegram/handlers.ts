@@ -473,8 +473,9 @@ export function registerHandlers(bot: Telegraf) {
       `*Monitor:*\n` +
       `\`/status\` — Balance & position\n` +
       `\`/chart\` — Price chart\n\n` +
-      `*Fund:*\n` +
-      `\`/fund\` — Buy or bridge USDC\n\n` +
+      `*Money:*\n` +
+      `\`/fund\` — Buy USDC or bridge\n` +
+      `\`/withdraw\` — Cash out to bank\n\n` +
       `*Earn Points:*\n` +
       `Share your trades → Earn ⭐ points\n` +
       `Points unlock future bonuses & discounts\n\n` +
@@ -1330,6 +1331,9 @@ export function registerHandlers(bot: Telegraf) {
         break;
       case 'gas_drip':
         await handleGasDrip(ctx);
+        break;
+      case 'fund':
+        await handleFund(ctx);
         break;
     }
   });
@@ -2603,5 +2607,35 @@ async function handleWithdrawAction(ctx: Context) {
     console.error('[WithdrawAction] Error:', e);
     await ctx.editMessageText('❌ Failed to fetch balances. Try again.', mainMenuKeyboard());
   }
+}
+
+/**
+ * Handle fund action (from callback button)
+ */
+async function handleFund(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+  
+  if (!user) {
+    await ctx.editMessageText('Please connect your wallet first.');
+    return;
+  }
+  
+  await ctx.editMessageText(
+    `💰 *Manage Funds*\n\n` +
+    `*Your Wallet:*\n\`${user.walletAddress}\`\n\n` +
+    `Choose an option:`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💳 Buy USDC (Card)', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+          [{ text: '🌉 Bridge to Hyperliquid', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+          [{ text: '📋 Copy Address', callback_data: 'action:copy_address' }],
+          [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
+        ],
+      },
+    }
+  );
 }
 

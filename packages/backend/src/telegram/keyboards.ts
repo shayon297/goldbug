@@ -23,6 +23,10 @@ export function mainMenuKeyboard() {
       Markup.button.callback('📋 Orders', 'action:orders'),
     ],
     [
+      Markup.button.callback('💰 Fund', 'action:fund'),
+      Markup.button.callback('🏦 Withdraw', 'action:withdraw'),
+    ],
+    [
       Markup.button.callback('⚙️ Settings', 'action:settings'),
       Markup.button.callback('🔄 Refresh', 'action:refresh'),
     ],
@@ -410,6 +414,10 @@ export function readyToTradeKeyboard() {
       Markup.button.callback('📉 Short', 'action:short'),
     ],
     [Markup.button.callback('📊 View Chart', 'action:chart')],
+    [
+      Markup.button.callback('💰 Fund', 'action:fund'),
+      Markup.button.callback('🏦 Withdraw', 'action:withdraw'),
+    ],
   ]);
 }
 
@@ -424,6 +432,10 @@ export function positionActionsKeyboard() {
       Markup.button.callback('📉 Add Short', 'action:short'),
     ],
     [Markup.button.callback('📊 View Chart', 'action:chart')],
+    [
+      Markup.button.callback('💰 Fund', 'action:fund'),
+      Markup.button.callback('🏦 Withdraw', 'action:withdraw'),
+    ],
   ]);
 }
 
