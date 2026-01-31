@@ -837,6 +837,22 @@ export default function Home() {
           );
           console.log('[Bridge] Transfer complete (sponsored), hash:', result.hash);
           
+          // Notify backend of successful bridge
+          try {
+            if (telegramUser && API_URL) {
+              await fetch(`${API_URL}/api/bridge-complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  telegramUserId: telegramUser.id.toString(),
+                  amount: bridgeAmount,
+                }),
+              });
+            }
+          } catch {
+            // Non-fatal
+          }
+          
           setStep('bridged');
           return;
         } catch (sponsorError) {
@@ -914,6 +930,24 @@ export default function Home() {
       const transferTx = await usdc.transfer(HYPERLIQUID_BRIDGE, amountWei);
       await transferTx.wait();
       console.log('[Bridge] Transfer complete');
+
+      // Notify backend of successful bridge
+      try {
+        if (telegramUser && API_URL) {
+          await fetch(`${API_URL}/api/bridge-complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              telegramUserId: telegramUser.id.toString(),
+              amount: bridgeAmount,
+            }),
+          });
+          console.log('[Bridge] Notified backend of bridge completion');
+        }
+      } catch (notifyError) {
+        console.warn('[Bridge] Failed to notify backend:', notifyError);
+        // Non-fatal - bridge was still successful
+      }
 
       setStep('bridged');
     } catch (err) {
