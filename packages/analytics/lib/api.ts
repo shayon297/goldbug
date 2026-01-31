@@ -1,3 +1,5 @@
+import 'server-only';
+
 const API_URL = 'https://goldbug-production.up.railway.app';
 const API_KEY = 'goldbug-analytics-2026-secure';
 
@@ -103,12 +105,49 @@ export interface TradesData {
   timestamp: number;
 }
 
-export const api = {
-  getOverview: () => fetchAnalytics<OverviewData>('overview'),
-  getUserGrowth: (days = 30) => fetchAnalytics<UserGrowthData>('users', { days: days.toString() }),
-  getRetention: (weeks = 8) => fetchAnalytics<RetentionData>('retention', { weeks: weeks.toString() }),
-  getFunnel: (days = 30) => fetchAnalytics<FunnelData>('funnel', { days: days.toString() }),
-  getEngagement: () => fetchAnalytics<EngagementData>('engagement'),
-  getTrades: (days = 30) => fetchAnalytics<TradesData>('trades', { days: days.toString() }),
-};
+export interface AllAnalyticsData {
+  overview: OverviewData | null;
+  userGrowth: UserGrowthData | null;
+  retention: RetentionData | null;
+  funnel: FunnelData | null;
+  engagement: EngagementData | null;
+  trades: TradesData | null;
+  error: string | null;
+  timestamp: number;
+}
 
+export async function fetchAllAnalytics(): Promise<AllAnalyticsData> {
+  try {
+    const [overview, userGrowth, retention, funnel, engagement, trades] = await Promise.all([
+      fetchAnalytics<OverviewData>('overview'),
+      fetchAnalytics<UserGrowthData>('users', { days: '30' }),
+      fetchAnalytics<RetentionData>('retention', { weeks: '8' }),
+      fetchAnalytics<FunnelData>('funnel', { days: '30' }),
+      fetchAnalytics<EngagementData>('engagement'),
+      fetchAnalytics<TradesData>('trades', { days: '30' }),
+    ]);
+
+    return {
+      overview,
+      userGrowth,
+      retention,
+      funnel,
+      engagement,
+      trades,
+      error: null,
+      timestamp: Date.now(),
+    };
+  } catch (err) {
+    console.error('Failed to fetch analytics:', err);
+    return {
+      overview: null,
+      userGrowth: null,
+      retention: null,
+      funnel: null,
+      engagement: null,
+      trades: null,
+      error: err instanceof Error ? err.message : 'Failed to load analytics',
+      timestamp: Date.now(),
+    };
+  }
+}
