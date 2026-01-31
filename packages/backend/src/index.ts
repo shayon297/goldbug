@@ -1251,8 +1251,7 @@ async function main() {
   }
 
   // Start 6-hour chart broadcast scheduler
-  // TEMPORARILY DISABLED - causing SIGSEGV crashes
-  // startChartScheduler(bot);
+  startChartScheduler(bot);
 
   // Hourly (6h) position updates
   const POSITION_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
