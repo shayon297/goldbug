@@ -91,16 +91,16 @@ async function getPreTradeCheck(
   const arbBalance = parseFloat(arbBalances.usdc);
   const requiredMargin = sizeUsd / leverage;
   
-  // Case 1: No funds on Hyperliquid, but has funds on Arbitrum → bridge
+  // Case 1: No funds on exchange, but has funds in holding → transfer
   if (hlBalance < MIN_TRADE_BALANCE && arbBalance >= 5) {
     return {
       canTrade: false,
       hlBalance,
       arbBalance,
       requiredMargin,
-      message: `⚠️ *Bridge Required*\n\n` +
-        `You have $${arbBalance.toFixed(2)} USDC on Arbitrum.\n` +
-        `Bridge it to Hyperliquid to start trading.\n\n` +
+      message: `⚠️ *Transfer Required*\n\n` +
+        `You have $${arbBalance.toFixed(2)} in your account.\n` +
+        `Transfer it to the exchange to start trading.\n\n` +
         `💡 _This takes ~10 seconds_`,
       action: 'bridge',
     };
@@ -116,7 +116,7 @@ async function getPreTradeCheck(
       message: `💰 *Fund Your Account*\n\n` +
         `Minimum $${MIN_TRADE_BALANCE} required to trade.\n` +
         `Current balance: $${hlBalance.toFixed(2)}\n\n` +
-        `Buy USDC with card or crypto:`,
+        `Add funds with card:`,
       action: 'fund',
     };
   }
@@ -236,17 +236,17 @@ async function getAccountSummary(walletAddress: string, points?: number): Promis
     positionText = `${side} ${Math.abs(size).toFixed(4)} ${TRADING_ASSET} @ ${leverage}x\nEntry: $${entry}\n${pnlEmoji} PnL: $${pnl}`;
   }
 
-  // Show bridge prompt if funds on Arbitrum but not on Hyperliquid
-  const needsBridge = parseFloat(arbBalances.usdc) >= 5 && parseFloat(balance) < 5;
-  const bridgeHint = needsBridge ? `\n\n⚠️ *You have USDC on Arbitrum!*\nUse /bridge to move it to Hyperliquid` : '';
+  // Show transfer prompt if funds in holding but not on exchange
+  const needsTransfer = parseFloat(arbBalances.usdc) >= 5 && parseFloat(balance) < 5;
+  const transferHint = needsTransfer ? `\n\n⚠️ *Funds available to transfer!*\nTap Fund to move them to the exchange.` : '';
 
   // Points display
   const pointsDisplay = points !== undefined ? `\n\n⭐ *Goldbug Points*: ${points.toLocaleString()}\n_Share trades to earn rewards_` : '';
 
-  return `🏦 *Wallet*\n\`${walletAddress}\`\n\n` +
-    `💎 *Hyperliquid*\n💰 Balance: $${balance}\n💵 Withdrawable: $${withdrawable}\n\n` +
-    `🔷 *Arbitrum*\n💵 USDC: $${arbUsdc}\n⛽ ETH: ${arbEth}${bridgeHint}\n\n` +
-    `📊 *${TRADING_ASSET} Position*\n${positionText}\n\n` +
+  return `💰 *Account Summary*\n\n` +
+    `📈 *Exchange Balance*\n💵 Trading: $${balance}\n💸 Withdrawable: $${withdrawable}\n\n` +
+    `🏦 *Holding*\n💵 Available: $${arbUsdc}${transferHint}\n\n` +
+    `📊 *Gold Position*\n${positionText}\n\n` +
     `💲 *${TRADING_ASSET} Price*: $${price.toFixed(2)}${pointsDisplay}`;
 }
 
@@ -291,14 +291,14 @@ export function registerHandlers(bot: Telegraf) {
         
         await ctx.replyWithMarkdown(
           `${sideEmoji} *Someone shared a trade with you!*\n\n` +
-          `*${side.toUpperCase()}* ${TRADING_ASSET}\n` +
+          `*${side.toUpperCase()}* Gold\n` +
           `💵 Size: $${sizeUsd}\n` +
           `📊 Leverage: ${leverage}x\n\n` +
           `━━━━━━━━━━━━━━━━━━━━\n` +
-          `*Create your wallet to copy this trade!*\n\n` +
+          `*Create your account to copy this trade!*\n\n` +
           `Setup takes 30 seconds:\n` +
-          `1️⃣ Create wallet\n` +
-          `2️⃣ Fund with card/crypto\n` +
+          `1️⃣ Create account\n` +
+          `2️⃣ Fund with card\n` +
           `3️⃣ Copy the trade\n\n` +
           `👇 *Tap below to start*`,
           connectWalletKeyboard(MINIAPP_URL)
@@ -311,16 +311,15 @@ export function registerHandlers(bot: Telegraf) {
         `🥇 *Trade Gold. Keep Your Edge.*\n\n` +
         `Tired of MT4 spreads eating your profits?\n\n` +
         `Goldbug gives you:\n` +
-        `• *0.01% fees* (vs 0.5%+ on MT4/MT5)\n` +
-        `• *Up to 20x leverage* on gold\n` +
-        `• *No broker* — trade directly on-chain\n` +
-        `• *Instant withdrawals* — your money, your keys\n\n` +
+        `• *0.01% fees* (vs 0.5%+ on brokers)\n` +
+        `• *Up to 20x leverage* on XAU/USD\n` +
+        `• *No middleman* — trade on Hyperliquid exchange\n` +
+        `• *Instant withdrawals* — your money, always\n\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `*Setup in 4 steps:*\n\n` +
-        `1️⃣ Create wallet (30 sec)\n` +
-        `2️⃣ Fund with card or crypto\n` +
-        `3️⃣ Bridge to Hyperliquid\n` +
-        `4️⃣ Trade gold\n\n` +
+        `*Get started in 3 steps:*\n\n` +
+        `1️⃣ Create account (30 sec)\n` +
+        `2️⃣ Fund with card or transfer\n` +
+        `3️⃣ Start trading gold\n\n` +
         `👇 *Tap below to start*`,
         connectWalletKeyboard(MINIAPP_URL)
       );
@@ -443,7 +442,7 @@ export function registerHandlers(bot: Telegraf) {
       const hasArbFunds = arbUsdc >= 5;
       
       if (isLowBalance && hasArbFunds) {
-        dashboard += `\n\n⚠️ *Bridge your $${arbUsdc.toFixed(0)} USDC to trade!*`;
+        dashboard += `\n\n⚠️ *Transfer your $${arbUsdc.toFixed(0)} to start trading!*`;
         await ctx.replyWithMarkdown(dashboard, lowBalanceDashboardKeyboard(MINIAPP_URL, true));
       } else if (isLowBalance && !hasPosition) {
         dashboard += `\n\n⚠️ *Fund your account to start trading*`;
@@ -467,19 +466,20 @@ export function registerHandlers(bot: Telegraf) {
     await ctx.replyWithMarkdown(
       `🥇 *Goldbug Commands*\n\n` +
       `*Trade:*\n` +
-      `\`/long $100 5x\` — Go long\n` +
-      `\`/short $50 10x\` — Go short\n` +
+      `\`/long $100 5x\` — Go long on gold\n` +
+      `\`/short $50 10x\` — Go short on gold\n` +
       `\`/close\` — Close position\n\n` +
       `*Monitor:*\n` +
       `\`/status\` — Balance & position\n` +
       `\`/chart\` — Price chart\n\n` +
       `*Money:*\n` +
-      `\`/fund\` — Buy USDC or bridge\n` +
+      `\`/fund\` — Add funds\n` +
       `\`/withdraw\` — Cash out to bank\n\n` +
       `*Earn Points:*\n` +
       `Share your trades → Earn ⭐ points\n` +
       `Points unlock future bonuses & discounts\n\n` +
-      `💡 _Type naturally: "long 100 5x" works too!_`,
+      `💡 _Type naturally: "long 100 5x" works too!_\n\n` +
+      `_Powered by Hyperliquid Exchange_`,
       mainMenuKeyboard()
     );
   });
@@ -682,11 +682,11 @@ export function registerHandlers(bot: Telegraf) {
       // No USDC on Arbitrum
       if (usdcBalance < 1) {
         await ctx.replyWithMarkdown(
-          `🌉 *Bridge USDC to Hyperliquid*\n\n` +
-          `⚠️ *No USDC on Arbitrum*\n\n` +
-          `You need USDC on Arbitrum first.\n` +
+          `💸 *Transfer Funds to Exchange*\n\n` +
+          `⚠️ *No funds to transfer*\n\n` +
+          `You need to fund your account first.\n` +
           `Current balance: $${usdcBalance.toFixed(2)}\n\n` +
-          `Buy USDC with card or crypto:`,
+          `Add funds with card:`,
           noUsdcKeyboard(MINIAPP_URL)
         );
         return;
@@ -2086,7 +2086,7 @@ async function handleSideSelection(ctx: Context, side: 'long' | 'short') {
         `💰 *Fund Your Account*\n\n` +
         `Minimum $${MIN_TRADE_BALANCE} required to trade.\n` +
         `Current balance: $${hlBalance.toFixed(2)}\n\n` +
-        `Buy USDC with card or crypto:`,
+        `Add funds with card:`,
         { parse_mode: 'Markdown', ...fundPromptKeyboard(MINIAPP_URL) }
       );
       return;
@@ -2617,21 +2617,19 @@ async function handleFund(ctx: Context) {
   const user = await getUserByTelegramId(telegramId);
   
   if (!user) {
-    await ctx.editMessageText('Please connect your wallet first.');
+    await ctx.editMessageText('Please create your account first.');
     return;
   }
   
   await ctx.editMessageText(
-    `💰 *Manage Funds*\n\n` +
-    `*Your Wallet:*\n\`${user.walletAddress}\`\n\n` +
-    `Choose an option:`,
+    `💰 *Fund Your Account*\n\n` +
+    `Choose how to add funds:`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '💳 Buy USDC (Card)', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
-          [{ text: '🌉 Bridge to Hyperliquid', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
-          [{ text: '📋 Copy Address', callback_data: 'action:copy_address' }],
+          [{ text: '💳 Fund with Card', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+          [{ text: '💸 Transfer to Exchange', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
           [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
         ],
       },

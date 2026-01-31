@@ -4,7 +4,7 @@ import { Markup } from 'telegraf';
  * Inline keyboard builders for the trading bot
  */
 
-// Connect wallet button (opens Mini App)
+// Connect account button (opens Mini App)
 export function connectWalletKeyboard(miniAppUrl: string) {
   return Markup.inlineKeyboard([
     [Markup.button.webApp('🚀 Start Trading', miniAppUrl)],
@@ -44,7 +44,11 @@ export function dashboardKeyboard(hasPosition: boolean, miniAppUrl: string) {
       [Markup.button.callback('🔴 Close Position', 'action:close')],
       [
         Markup.button.callback('📊 Details', 'action:details'),
-        Markup.button.webApp('💳 Add Funds', `${miniAppUrl}?action=onramp`),
+        Markup.button.callback('📈 Chart', 'action:chart'),
+      ],
+      [
+        Markup.button.callback('💰 Fund', 'action:fund'),
+        Markup.button.callback('🏦 Withdraw', 'action:withdraw'),
       ],
     ]);
   }
@@ -53,6 +57,10 @@ export function dashboardKeyboard(hasPosition: boolean, miniAppUrl: string) {
     [
       Markup.button.callback('📈 Long', 'action:long'),
       Markup.button.callback('📉 Short', 'action:short'),
+    ],
+    [
+      Markup.button.callback('💰 Fund', 'action:fund'),
+      Markup.button.callback('🏦 Withdraw', 'action:withdraw'),
     ],
     [
       Markup.button.callback('📊 Details', 'action:details'),
@@ -121,8 +129,8 @@ export function confirmOrderKeyboard() {
 export function balanceKeyboard(miniAppUrl: string) {
   return Markup.inlineKeyboard([
     [
-      Markup.button.webApp('🌉 Bridge USDC', `${miniAppUrl}?action=bridge`),
-      Markup.button.webApp('💳 Buy USDC', `${miniAppUrl}?action=onramp`),
+      Markup.button.webApp('💸 Transfer to Exchange', `${miniAppUrl}?action=bridge`),
+      Markup.button.webApp('💳 Buy with Card', `${miniAppUrl}?action=onramp`),
     ],
     [Markup.button.callback('🏠 Main Menu', 'action:menu')],
   ]);
@@ -262,11 +270,11 @@ export function copiedTradeKeyboard() {
 // ============================================
 
 /**
- * Prompt to bridge when user has funds on Arbitrum but not Hyperliquid
+ * Prompt to transfer funds when user has funds in holding but not on exchange
  */
 export function bridgePromptKeyboard(miniAppUrl: string) {
   return Markup.inlineKeyboard([
-    [Markup.button.webApp('🌉 Bridge USDC Now', `${miniAppUrl}?action=bridge`)],
+    [Markup.button.webApp('💸 Transfer to Exchange', `${miniAppUrl}?action=bridge`)],
     [Markup.button.callback('📊 Check Balance', 'action:refresh')],
     [Markup.button.callback('🏠 Main Menu', 'action:menu')],
   ]);
@@ -314,7 +322,7 @@ export function postCloseKeyboard(showWithdraw: boolean) {
 }
 
 /**
- * Post-bridge keyboard prompting user to start trading
+ * Post-transfer keyboard prompting user to start trading
  */
 export function postBridgeKeyboard() {
   return Markup.inlineKeyboard([
@@ -327,11 +335,11 @@ export function postBridgeKeyboard() {
 }
 
 /**
- * Post-onramp keyboard prompting user to bridge
+ * Post-onramp keyboard prompting user to transfer to exchange
  */
 export function postOnrampKeyboard(miniAppUrl: string) {
   return Markup.inlineKeyboard([
-    [Markup.button.webApp('🌉 Bridge to Hyperliquid', `${miniAppUrl}?action=bridge`)],
+    [Markup.button.webApp('💸 Transfer to Exchange', `${miniAppUrl}?action=bridge`)],
     [Markup.button.callback('📊 Check Balance', 'action:refresh')],
   ]);
 }
@@ -342,13 +350,13 @@ export function postOnrampKeyboard(miniAppUrl: string) {
 export function lowBalanceDashboardKeyboard(miniAppUrl: string, hasArbFunds: boolean) {
   if (hasArbFunds) {
     return Markup.inlineKeyboard([
-      [Markup.button.webApp('🌉 Bridge USDC to Trade', `${miniAppUrl}?action=bridge`)],
+      [Markup.button.webApp('💸 Transfer Funds to Exchange', `${miniAppUrl}?action=bridge`)],
       [Markup.button.callback('📊 View Balance', 'action:details')],
     ]);
   }
   
   return Markup.inlineKeyboard([
-    [Markup.button.webApp('💳 Fund Account', `${miniAppUrl}?action=onramp`)],
+    [Markup.button.webApp('💳 Fund Account (Card)', `${miniAppUrl}?action=onramp`)],
     [Markup.button.callback('📋 How to Fund', 'action:deposit_help')],
   ]);
 }
