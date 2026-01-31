@@ -530,6 +530,36 @@ export class HyperliquidClient {
     return results;
   }
 
+  /**
+   * Withdraw USDC from Hyperliquid to Arbitrum
+   * This "unbridges" funds back to the user's Arbitrum wallet
+   */
+  async withdraw(agentPrivateKey: string, walletAddress: string, amount: number): Promise<OrderResult> {
+    console.log(`[Hyperliquid] Withdrawing ${amount} USDC to ${walletAddress}`);
+    
+    try {
+      const result = await this.signerRequest<OrderResult>('/l1/withdraw', {
+        agent_private_key: agentPrivateKey,
+        wallet_address: walletAddress,
+        amount,
+        destination: walletAddress, // Withdraw to same address
+      });
+
+      console.log(`[Hyperliquid] Withdraw result:`, JSON.stringify(result, null, 2));
+
+      if (result.status === 'ok') {
+        return { status: 'ok', response: result.response as any };
+      } else {
+        const errorMsg = typeof result.response === 'string' ? result.response : JSON.stringify(result.response);
+        return { status: 'err', error: errorMsg || 'Withdraw failed' };
+      }
+    } catch (e: any) {
+      const errorMsg = e.response?.data?.response || e.message || 'Unknown error';
+      console.log(`[Hyperliquid] Withdraw exception:`, errorMsg);
+      return { status: 'err', error: errorMsg };
+    }
+  }
+
   private roundToDecimals(value: number, decimals: number): number {
     const factor = Math.pow(10, decimals);
     return Math.floor(value * factor) / factor;

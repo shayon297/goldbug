@@ -516,7 +516,7 @@ export function registerHandlers(bot: Telegraf) {
     );
   });
 
-  // /offramp command - sell crypto for fiat
+  // /offramp command - redirect to /withdraw for unified flow
   bot.command('offramp', async (ctx) => {
     const telegramId = BigInt(ctx.from.id);
     const user = await getUserByTelegramId(telegramId);
@@ -526,22 +526,49 @@ export function registerHandlers(bot: Telegraf) {
       return;
     }
 
-    await ctx.replyWithMarkdown(
-      `🏦 *Sell USDC*\n\n` +
-      `Convert your USDC to fiat and withdraw to your bank.\n\n` +
-      `⚠️ *Note:* Your USDC must be on Arbitrum (not Hyperliquid).\n` +
-      `Use the Hyperliquid website to withdraw first if needed.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🏦 Sell USDC', web_app: { url: `${MINIAPP_URL}?action=offramp` } }],
-          ],
-        },
+    // Use the same unified withdraw flow
+    try {
+      const hl = await getHyperliquidClient();
+      const [hlBalance, arbBalance] = await Promise.all([
+        hl.getAccountBalance(user.walletAddress),
+        hl.getArbitrumBalance(user.walletAddress),
+      ]);
+
+      const hlWithdrawable = parseFloat(hlBalance.withdrawable || '0');
+      const arbUsdc = arbBalance.usdc;
+
+      let message = `🏦 *Sell USDC*\n\n`;
+      message += `💎 *Hyperliquid:* $${hlWithdrawable.toFixed(2)} withdrawable\n`;
+      message += `🔷 *Arbitrum:* $${arbUsdc.toFixed(2)} USDC\n\n`;
+
+      const buttons: any[][] = [];
+
+      if (hlWithdrawable >= 1) {
+        message += `_Step 1:_ Unbridge from Hyperliquid to Arbitrum\n`;
+        message += `_Step 2:_ Sell USDC to fiat\n\n`;
+        buttons.push([{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)}`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
       }
-    );
+
+      if (arbUsdc >= 1) {
+        buttons.push([{ text: '🏦 Sell USDC to Fiat', web_app: { url: `${MINIAPP_URL}?action=offramp` } }]);
+      }
+
+      if (buttons.length === 0) {
+        message += `⚠️ Minimum $1 required to sell.`;
+      }
+
+      buttons.push([{ text: '« Back', callback_data: 'menu:main' }]);
+
+      await ctx.replyWithMarkdown(message, {
+        reply_markup: { inline_keyboard: buttons },
+      });
+    } catch (e: any) {
+      console.error('[Offramp] Error:', e);
+      await ctx.reply('❌ Failed to fetch balances. Try again.');
+    }
   });
 
-  // /withdraw command - alias for offramp (more intuitive name)
+  // /withdraw command - full withdraw flow (Hyperliquid → Arbitrum → fiat)
   bot.command('withdraw', async (ctx) => {
     const telegramId = BigInt(ctx.from.id);
     const user = await getUserByTelegramId(telegramId);
@@ -551,19 +578,46 @@ export function registerHandlers(bot: Telegraf) {
       return;
     }
 
-    await ctx.replyWithMarkdown(
-      `🏦 *Withdraw to Bank*\n\n` +
-      `Convert your USDC to fiat and withdraw to your bank account.\n\n` +
-      `⚠️ *Important:* Your USDC must be on Arbitrum.\n` +
-      `If your funds are on Hyperliquid, withdraw to Arbitrum first at [app.hyperliquid.xyz](https://app.hyperliquid.xyz).`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🏦 Withdraw to Bank', web_app: { url: `${MINIAPP_URL}?action=offramp` } }],
-          ],
-        },
+    try {
+      const hl = await getHyperliquidClient();
+      const [hlBalance, arbBalance] = await Promise.all([
+        hl.getAccountBalance(user.walletAddress),
+        hl.getArbitrumBalance(user.walletAddress),
+      ]);
+
+      const hlWithdrawable = parseFloat(hlBalance.withdrawable || '0');
+      const arbUsdc = arbBalance.usdc;
+
+      // Show balances on both chains
+      let message = `🏦 *Withdraw to Bank*\n\n`;
+      message += `💎 *Hyperliquid:* $${hlWithdrawable.toFixed(2)} withdrawable\n`;
+      message += `🔷 *Arbitrum:* $${arbUsdc.toFixed(2)} USDC\n\n`;
+
+      const buttons: any[][] = [];
+
+      if (hlWithdrawable >= 1) {
+        message += `_Step 1:_ Unbridge from Hyperliquid to Arbitrum\n`;
+        message += `_Step 2:_ Sell USDC to fiat\n\n`;
+        buttons.push([{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)}`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
       }
-    );
+
+      if (arbUsdc >= 1) {
+        buttons.push([{ text: '🏦 Sell USDC to Fiat', web_app: { url: `${MINIAPP_URL}?action=offramp` } }]);
+      }
+
+      if (buttons.length === 0) {
+        message += `⚠️ Minimum $1 required to withdraw.`;
+      }
+
+      buttons.push([{ text: '« Back', callback_data: 'menu:main' }]);
+
+      await ctx.replyWithMarkdown(message, {
+        reply_markup: { inline_keyboard: buttons },
+      });
+    } catch (e: any) {
+      console.error('[Withdraw] Error:', e);
+      await ctx.reply('❌ Failed to fetch balances. Try again.');
+    }
   });
 
   // /position command
@@ -1380,6 +1434,94 @@ export function registerHandlers(bot: Telegraf) {
       } else {
         await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
       }
+    }
+  });
+
+  // Withdraw/unbridge from Hyperliquid to Arbitrum
+  bot.action(/^withdraw:unbridge:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+
+    const telegramId = BigInt(ctx.from!.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) {
+      await ctx.editMessageText('Please connect your wallet first.');
+      return;
+    }
+
+    const amount = parseFloat(ctx.match[1]);
+    if (isNaN(amount) || amount < 1) {
+      await ctx.editMessageText('❌ Invalid withdrawal amount.');
+      return;
+    }
+
+    await ctx.editMessageText(`⏳ Withdrawing $${amount.toFixed(2)} from Hyperliquid to Arbitrum...`);
+
+    try {
+      const hl = await getHyperliquidClient();
+      
+      console.log(`[Withdraw] Unbridging ${amount} USDC for ${user.walletAddress}`);
+      const result = await hl.withdraw(user.agentPrivateKey, user.walletAddress, amount);
+      console.log(`[Withdraw] Result:`, JSON.stringify(result, null, 2));
+
+      if (result.status === 'ok') {
+        await ctx.editMessageText(
+          `✅ *Withdrawal Initiated*\n\n` +
+          `$${amount.toFixed(2)} USDC is being transferred to Arbitrum.\n\n` +
+          `⏱️ This takes 1-5 minutes. Once confirmed, tap below to sell:\n`,
+          { 
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🏦 Sell USDC to Fiat', web_app: { url: `${MINIAPP_URL}?action=offramp` } }],
+                [{ text: '🔄 Refresh Balance', callback_data: 'menu:refresh_withdraw' }],
+              ],
+            },
+          }
+        );
+      } else {
+        const errorMsg = result.error || 'Unknown error';
+        await ctx.editMessageText(`❌ Withdrawal failed: ${errorMsg}`, mainMenuKeyboard());
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Withdraw] Error:', message);
+      await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
+    }
+  });
+
+  // Refresh withdraw balance
+  bot.action('menu:refresh_withdraw', async (ctx) => {
+    await ctx.answerCbQuery('Refreshing...');
+    
+    const telegramId = BigInt(ctx.from!.id);
+    const user = await getUserByTelegramId(telegramId);
+
+    if (!user) return;
+
+    try {
+      const hl = await getHyperliquidClient();
+      const arbBalance = await hl.getArbitrumBalance(user.walletAddress);
+
+      await ctx.editMessageText(
+        `🔷 *Arbitrum Balance*\n\n` +
+        `💵 USDC: $${arbBalance.usdc.toFixed(2)}\n` +
+        `⛽ ETH: ${arbBalance.eth.toFixed(4)}\n\n` +
+        `Ready to sell? Tap below:`,
+        { 
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🏦 Sell USDC to Fiat', web_app: { url: `${MINIAPP_URL}?action=offramp` } }],
+              [{ text: '🔄 Refresh', callback_data: 'menu:refresh_withdraw' }],
+              [{ text: '« Back', callback_data: 'menu:main' }],
+            ],
+          },
+        }
+      );
+    } catch (e: any) {
+      console.error('[RefreshWithdraw] Error:', e);
+      await ctx.editMessageText('❌ Failed to refresh. Try again.');
     }
   });
 

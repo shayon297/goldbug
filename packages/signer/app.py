@@ -104,6 +104,11 @@ class CancelOrderRequest(BaseRequest):
     oid: int
 
 
+class WithdrawRequest(BaseRequest):
+    amount: float  # Amount in USDC to withdraw
+    destination: str  # Arbitrum address to withdraw to (usually same as wallet_address)
+
+
 app = FastAPI()
 
 
@@ -187,4 +192,16 @@ def enable_dex_abstraction(req: BaseRequest, x_signer_api_key: Optional[str] = H
     require_api_key(x_signer_api_key)
     exchange = get_exchange(req.agent_private_key, req.wallet_address)
     return exchange.agent_enable_dex_abstraction()
+
+
+@app.post("/l1/withdraw")
+def withdraw(req: WithdrawRequest, x_signer_api_key: Optional[str] = Header(default=None)):
+    """Withdraw USDC from Hyperliquid to Arbitrum"""
+    require_api_key(x_signer_api_key)
+    exchange = get_exchange(req.agent_private_key, req.wallet_address)
+    print(f"[withdraw] amount={req.amount}, destination={req.destination}")
+    # Hyperliquid SDK withdraw method - withdraws to Arbitrum L1
+    result = exchange.withdraw(req.amount, req.destination)
+    print(f"[withdraw] result: {result}")
+    return result
 
