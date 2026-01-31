@@ -1,5 +1,5 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://goldbug-production.up.railway.app';
-const API_KEY = process.env.NEXT_PUBLIC_ANALYTICS_API_KEY || 'goldbug-analytics-secret';
+const API_URL = 'https://goldbug-production.up.railway.app';
+const API_KEY = 'goldbug-analytics-2026-secure';
 
 async function fetchAnalytics<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
   const url = new URL(`${API_URL}/api/analytics/${endpoint}`);
