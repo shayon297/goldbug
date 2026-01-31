@@ -924,6 +924,85 @@ async function main() {
     }
   });
 
+  // Auth complete endpoint - called after successful Mini App authorization
+  // Used to auto-execute pending orders
+  app.post('/api/auth-complete', registrationLimiter, async (req: Request, res: Response) => {
+    try {
+      const { telegramUserId } = req.body;
+      
+      if (!telegramUserId) {
+        res.status(400).json({ error: 'Missing telegramUserId' });
+        return;
+      }
+
+      console.log(`[AuthComplete] User ${telegramUserId} completed authorization`);
+
+      // Check if user has a pending order in session
+      const user = await getUserByTelegramId(BigInt(telegramUserId));
+      if (!user) {
+        res.json({ success: true, hasPendingOrder: false });
+        return;
+      }
+
+      const session = await getOrCreateSession(BigInt(telegramUserId));
+      
+      if (session.pendingOrder) {
+        console.log(`[AuthComplete] User ${telegramUserId} has pending order:`, session.pendingOrder);
+        
+        // Execute the pending order
+        try {
+          const hl = await getHyperliquidClient();
+          const result = await hl.placeOrder(
+            user.agentPrivateKey,
+            user.walletAddress,
+            {
+              side: session.pendingOrder.side,
+              sizeUsd: session.pendingOrder.sizeUsd,
+              leverage: session.pendingOrder.leverage,
+              orderType: session.pendingOrder.orderType,
+              limitPrice: session.pendingOrder.limitPrice,
+            }
+          );
+
+          // Clear session after execution
+          await clearSession(BigInt(telegramUserId));
+
+          if (result.status === 'ok') {
+            // Notify user of successful order
+            await bot.telegram.sendMessage(
+              Number(telegramUserId),
+              `✅ *Order Executed!*\n\n` +
+              `Your pending ${session.pendingOrder.side.toUpperCase()} order has been placed.`,
+              { parse_mode: 'Markdown' }
+            );
+            
+            res.json({ success: true, orderExecuted: true });
+          } else {
+            await bot.telegram.sendMessage(
+              Number(telegramUserId),
+              `❌ *Order Failed*\n\n${result.error}`,
+              { parse_mode: 'Markdown' }
+            );
+            res.json({ success: true, orderExecuted: false, error: result.error });
+          }
+        } catch (orderError: any) {
+          console.error('[AuthComplete] Order execution failed:', orderError);
+          await bot.telegram.sendMessage(
+            Number(telegramUserId),
+            `❌ *Order Failed*\n\n${orderError.message}`,
+            { parse_mode: 'Markdown' }
+          );
+          res.json({ success: true, orderExecuted: false, error: orderError.message });
+        }
+      } else {
+        res.json({ success: true, hasPendingOrder: false });
+      }
+    } catch (error) {
+      console.error('[AuthComplete] Error:', error);
+      res.status(500).json({ error: 'Failed to process auth completion' });
+    }
+  });
+
   // Gas drip endpoint - sends small amount of ETH for gas
   app.post('/api/gas-drip', registrationLimiter, async (req: Request, res: Response) => {
     try {

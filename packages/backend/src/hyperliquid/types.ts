@@ -64,6 +64,7 @@ export interface UserFill {
   time: number;
   oid: number;
   fee: string;
+  closedPnl?: string; // Present when a position is closed
 }
 
 export interface OrderResult {
@@ -72,12 +73,14 @@ export interface OrderResult {
     type: 'order' | 'cancel';
     data?: {
       statuses: Array<{
-        filled?: { totalSz: string; avgPx: string; oid: number };
+        filled?: { totalSz: string; avgPx: string; oid: number; closedPnl?: string };
         resting?: { oid: number };
         error?: string;
       }>;
     };
   };
+  // Used for close position results
+  filled?: { totalSz: string; avgPx: string; closedPnl?: string };
   error?: string;
 }
 

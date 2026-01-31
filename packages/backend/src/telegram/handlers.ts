@@ -2500,7 +2500,7 @@ async function handleGasDrip(ctx: Context) {
         }
       );
     } else {
-      const err = await response.json();
+      const err = await response.json() as { error?: string };
       await ctx.editMessageText(
         `⚠️ *Gas Drip Unavailable*\n\n` +
         `${err.error || 'Unable to send gas right now.'}\n\n` +

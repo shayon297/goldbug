@@ -531,6 +531,45 @@ export class HyperliquidClient {
   }
 
   /**
+   * Get Hyperliquid account balance (total and withdrawable)
+   */
+  async getAccountBalance(walletAddress: string): Promise<{ balance: number; withdrawable: string }> {
+    const state = await this.getUserState(walletAddress);
+    return {
+      balance: parseFloat(state.marginSummary.accountValue),
+      withdrawable: state.withdrawable,
+    };
+  }
+
+  /**
+   * Get Arbitrum USDC and ETH balances
+   */
+  async getArbitrumBalance(walletAddress: string): Promise<{ usdc: number; eth: number }> {
+    const { ethers, Contract } = await import('ethers');
+    const ARBITRUM_RPC = 'https://arb1.arbitrum.io/rpc';
+    const USDC_ADDRESS = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831';
+    const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
+    
+    try {
+      const provider = new ethers.JsonRpcProvider(ARBITRUM_RPC);
+      const usdc = new Contract(USDC_ADDRESS, ERC20_ABI, provider);
+      
+      const [usdcBal, ethBal] = await Promise.all([
+        usdc.balanceOf(walletAddress),
+        provider.getBalance(walletAddress),
+      ]);
+      
+      return {
+        usdc: parseFloat(ethers.formatUnits(usdcBal, 6)),
+        eth: parseFloat(ethers.formatUnits(ethBal, 18)),
+      };
+    } catch (error) {
+      console.error('[Hyperliquid] Failed to fetch Arbitrum balances:', error);
+      return { usdc: 0, eth: 0 };
+    }
+  }
+
+  /**
    * Withdraw USDC from Hyperliquid to Arbitrum
    * This "unbridges" funds back to the user's Arbitrum wallet
    */
