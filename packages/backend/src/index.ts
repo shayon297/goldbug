@@ -115,14 +115,50 @@ async function main() {
           });
           
           if (user) {
+            // Automatically send gas drip so user can bridge
+            let gasSent = false;
+            try {
+              if (GAS_FUNDER_PRIVATE_KEY) {
+                const provider = new ethers.JsonRpcProvider(ARBITRUM_RPC);
+                const currentBalance = await provider.getBalance(walletAddress);
+                
+                if (currentBalance < MIN_GAS_BALANCE) {
+                  const funderWallet = new ethers.Wallet(GAS_FUNDER_PRIVATE_KEY, provider);
+                  const funderBalance = await provider.getBalance(funderWallet.address);
+                  
+                  if (funderBalance >= GAS_DRIP_AMOUNT) {
+                    console.log(`[Onramper] Auto gas drip: Sending ${ethers.formatEther(GAS_DRIP_AMOUNT)} ETH to ${walletAddress}`);
+                    const tx = await funderWallet.sendTransaction({
+                      to: walletAddress,
+                      value: GAS_DRIP_AMOUNT,
+                    });
+                    console.log(`[Onramper] Gas drip tx: ${tx.hash}`);
+                    gasSent = true;
+                  } else {
+                    console.warn('[Onramper] Gas funder depleted, cannot auto-drip');
+                  }
+                } else {
+                  console.log(`[Onramper] User ${walletAddress} already has ETH for gas, skipping drip`);
+                  gasSent = true; // Already has gas
+                }
+              }
+            } catch (gasError) {
+              console.error('[Onramper] Auto gas drip failed:', gasError);
+            }
+
             try {
               // Send notification with bridge button
+              const gasMessage = gasSent 
+                ? `⛽ Gas sent for bridging!\n\n`
+                : '';
+              
               await bot.telegram.sendMessage(
                 Number(user.telegramId),
                 `✅ *USDC Purchase Complete!*\n\n` +
                 `💵 You bought: ${cryptoAmount} ${cryptoCurrency}\n` +
                 `💳 Paid: ${fiatAmount} ${fiatCurrency}\n\n` +
-                `Your USDC is now on Arbitrum.\n` +
+                `${gasMessage}` +
+                `Your USDC is on Arbitrum.\n` +
                 `👇 *Bridge to Hyperliquid to start trading:*`,
                 { 
                   parse_mode: 'Markdown',
