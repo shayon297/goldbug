@@ -165,48 +165,53 @@ async function main() {
       
       const onrampMode = mode === 'sell' ? 'sell' : 'buy';
       
-      // Use Onramper Quick API Integration approach
-      // This bypasses the widget and redirects directly to best onramp
-      // See: https://docs.onramper.com/docs/integration-examples#quick-api-integration
+      // Onramper Widget with URL Signing
+      // See: https://docs.onramper.com/docs/signing-widget-url
+      //
+      // IMPORTANT: Only sign the sensitive wallet parameters, NOT the entire URL!
+      // Parameters to sign: wallets, walletAddressTags, networkWallets
+      // Must be lowercase, unencoded, and sorted alphabetically
       
+      const walletAddressLower = walletAddress.toLowerCase();
+      
+      // Step 1: Prepare signContent - ONLY the sensitive params, unencoded, sorted
+      // We're using networkWallets, so that's what we sign
+      const signContent = `networkWallets=arbitrum:${walletAddressLower}`;
+      
+      // Step 2: Generate HMAC-SHA256 signature
+      const crypto = await import('crypto');
+      const signature = crypto
+        .createHmac('sha256', ONRAMPER_SIGNING_SECRET)
+        .update(signContent)
+        .digest('hex');
+      
+      // Step 3: Build the full URL with all params
       const params = new URLSearchParams({
         apiKey: ONRAMPER_API_KEY,
         mode: onrampMode,
         defaultCrypto: 'usdc_arbitrum',
         onlyCryptos: 'usdc_arbitrum',
         onlyNetworks: 'arbitrum',
-        networkWallets: `arbitrum:${walletAddress}`,
+        networkWallets: `arbitrum:${walletAddressLower}`,
         walletAddressLocked: 'true',
-        // Quick API approach - skip widget, go directly to best onramp
-        skipTxScreen: 'true',
-        // Theme settings (still apply to provider selection if shown)
         themeName: 'dark',
+        containerColor: '18181bff',
         primaryColor: 'f59e0bff',
+        secondaryColor: '3f3f46ff',
+        cardColor: '27272aff',
+        primaryTextColor: 'ffffffff',
+        secondaryTextColor: 'a1a1aaff',
+        borderRadius: '0.75',
       });
       
-      // Sort parameters alphabetically for signature
-      const sortedParams = new URLSearchParams(
-        [...params.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-      );
-      const sortedQueryString = sortedParams.toString();
+      // Step 4: Append signature to URL
+      const finalUrl = `https://buy.onramper.com/?${params.toString()}&signature=${signature}`;
       
-      // Sign if we have a secret
-      let finalUrl: string;
-      if (ONRAMPER_SIGNING_SECRET) {
-        const crypto = await import('crypto');
-        const signature = crypto
-          .createHmac('sha256', ONRAMPER_SIGNING_SECRET)
-          .update(sortedQueryString)
-          .digest('hex');
-        
-        finalUrl = `https://buy.onramper.com/?${sortedQueryString}&signature=${signature}`;
-        console.log('[Onramper API] Signed URL for:', walletAddress, 'mode:', onrampMode);
-      } else {
-        finalUrl = `https://buy.onramper.com/?${sortedQueryString}`;
-        console.log('[Onramper API] Unsigned URL for:', walletAddress);
-      }
+      console.log('[Onramper] Wallet:', walletAddressLower);
+      console.log('[Onramper] SignContent:', signContent);
+      console.log('[Onramper] Signature:', signature);
       
-      res.json({ url: finalUrl, signed: !!ONRAMPER_SIGNING_SECRET });
+      res.json({ url: finalUrl, signed: true });
     } catch (error) {
       console.error('[Onramper URL] Error:', error);
       res.status(500).json({ error: 'Failed to generate Onramper URL' });
