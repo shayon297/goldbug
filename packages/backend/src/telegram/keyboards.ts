@@ -349,3 +349,94 @@ export function lowBalanceDashboardKeyboard(miniAppUrl: string, hasArbFunds: boo
   ]);
 }
 
+// ============================================
+// Deep UX Edge Case Keyboards
+// ============================================
+
+/**
+ * Gas help keyboard - when user has USDC but no ETH for gas
+ */
+export function gasHelpKeyboard(miniAppUrl: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('⛽ Request Gas Drip', 'action:gas_drip')],
+    [Markup.button.webApp('💳 Buy ETH', `${miniAppUrl}?action=onramp`)],
+    [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+
+/**
+ * No USDC on Arbitrum - prompt to buy
+ */
+export function noUsdcKeyboard(miniAppUrl: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.webApp('💳 Buy USDC', `${miniAppUrl}?action=onramp`)],
+    [Markup.button.callback('📋 How to Fund', 'action:deposit_help')],
+    [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+
+/**
+ * Confirm position reversal (long->short or vice versa)
+ */
+export function confirmReversalKeyboard(newSide: 'long' | 'short') {
+  const sideEmoji = newSide === 'long' ? '📈' : '📉';
+  return Markup.inlineKeyboard([
+    [Markup.button.callback(`✅ Close & Open ${newSide.toUpperCase()}`, `reversal:confirm:${newSide}`)],
+    [Markup.button.callback('❌ Keep Current Position', 'action:menu')],
+  ]);
+}
+
+/**
+ * Post-cancel keyboard - options after cancelling orders
+ */
+export function postCancelKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('📈 New Long', 'action:long'),
+      Markup.button.callback('📉 New Short', 'action:short'),
+    ],
+    [Markup.button.callback('📊 View Position', 'action:position')],
+    [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+
+/**
+ * Ready to trade keyboard - for users with balance
+ */
+export function readyToTradeKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('📈 Long', 'action:long'),
+      Markup.button.callback('📉 Short', 'action:short'),
+    ],
+    [Markup.button.callback('📊 View Chart', 'action:chart')],
+  ]);
+}
+
+/**
+ * Position actions keyboard - for users with open position
+ */
+export function positionActionsKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('🔴 Close Position', 'action:close')],
+    [
+      Markup.button.callback('📈 Add Long', 'action:long'),
+      Markup.button.callback('📉 Add Short', 'action:short'),
+    ],
+    [Markup.button.callback('📊 View Chart', 'action:chart')],
+  ]);
+}
+
+/**
+ * First trade celebration keyboard
+ */
+export function firstTradeKeyboard(params: TradeReceiptParams) {
+  const shareData = `share:${params.side === 'long' ? 'L' : 'S'}_${params.sizeUsd}_${params.leverage}_${Math.round(params.entryPrice)}`;
+  
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('📤 Share First Trade!', shareData)],
+    [Markup.button.callback('📊 View Chart', 'action:chart')],
+    [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+

@@ -23,6 +23,13 @@ import {
   insufficientMarginKeyboard,
   postCloseKeyboard,
   lowBalanceDashboardKeyboard,
+  gasHelpKeyboard,
+  noUsdcKeyboard,
+  confirmReversalKeyboard,
+  postCancelKeyboard,
+  readyToTradeKeyboard,
+  positionActionsKeyboard,
+  firstTradeKeyboard,
 } from './keyboards.js';
 import { 
   parseTradeCommand, 
@@ -277,6 +284,28 @@ export function registerHandlers(bot: Telegraf) {
     const deepLink = parseDeepLink(payload);
 
     if (!exists) {
+      // New user from shared trade link - special message
+      if (deepLink.type === 'trade' && deepLink.trade) {
+        const { side, sizeUsd, leverage } = deepLink.trade;
+        const sideEmoji = side === 'long' ? '📈' : '📉';
+        
+        await ctx.replyWithMarkdown(
+          `${sideEmoji} *Someone shared a trade with you!*\n\n` +
+          `*${side.toUpperCase()}* ${TRADING_ASSET}\n` +
+          `💵 Size: $${sizeUsd}\n` +
+          `📊 Leverage: ${leverage}x\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `*Create your wallet to copy this trade!*\n\n` +
+          `Setup takes 30 seconds:\n` +
+          `1️⃣ Create wallet\n` +
+          `2️⃣ Fund with card/crypto\n` +
+          `3️⃣ Copy the trade\n\n` +
+          `👇 *Tap below to start*`,
+          connectWalletKeyboard(MINIAPP_URL)
+        );
+        return;
+      }
+      
       // New user - compelling welcome for gold CFD traders
       await ctx.replyWithMarkdown(
         `🥇 *Trade Gold. Keep Your Edge.*\n\n` +
@@ -465,9 +494,38 @@ export function registerHandlers(bot: Telegraf) {
     }
 
     try {
+      const hl = await getHyperliquidClient();
+      const [state, arbBalances, position] = await Promise.all([
+        hl.getUserState(user.walletAddress),
+        getArbitrumBalances(user.walletAddress),
+        hl.getGoldPosition(user.walletAddress),
+      ]);
+
       const summary = await getAccountSummary(user.walletAddress, user.points);
-      await ctx.replyWithMarkdown(summary, balanceKeyboard(MINIAPP_URL));
+      
+      // Determine contextual keyboard based on user state
+      const hlBalance = parseFloat(state.marginSummary.accountValue);
+      const arbBalance = parseFloat(arbBalances.usdc);
+      const hasPosition = position && parseFloat(position.position.szi) !== 0;
+
+      let keyboard;
+      if (hasPosition) {
+        // User has open position → show position actions
+        keyboard = positionActionsKeyboard();
+      } else if (hlBalance >= MIN_TRADE_BALANCE) {
+        // User has balance and ready to trade
+        keyboard = readyToTradeKeyboard();
+      } else if (arbBalance >= 5) {
+        // User has funds on Arb, needs to bridge
+        keyboard = bridgePromptKeyboard(MINIAPP_URL);
+      } else {
+        // User needs to fund
+        keyboard = fundPromptKeyboard(MINIAPP_URL);
+      }
+
+      await ctx.replyWithMarkdown(summary, keyboard);
     } catch (error) {
+      console.error('[Status] Error:', error);
       await ctx.reply('Error fetching status. Please try again.');
     }
   });
@@ -614,18 +672,68 @@ export function registerHandlers(bot: Telegraf) {
       return;
     }
 
-    await ctx.replyWithMarkdown(
-      `🌉 *Bridge USDC to Hyperliquid*\n\n` +
-      `Your wallet:\n\`${user.walletAddress}\`\n\n` +
-      `Tap the button below to bridge your USDC from Arbitrum to Hyperliquid instantly.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🌉 Bridge Now', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
-          ],
-        },
+    try {
+      // Pre-check: Does user have USDC on Arbitrum?
+      const arbBalance = await getArbitrumBalances(user.walletAddress);
+      const usdcBalance = parseFloat(arbBalance.usdc);
+      const ethBalance = parseFloat(arbBalance.eth);
+
+      // No USDC on Arbitrum
+      if (usdcBalance < 1) {
+        await ctx.replyWithMarkdown(
+          `🌉 *Bridge USDC to Hyperliquid*\n\n` +
+          `⚠️ *No USDC on Arbitrum*\n\n` +
+          `You need USDC on Arbitrum first.\n` +
+          `Current balance: $${usdcBalance.toFixed(2)}\n\n` +
+          `Buy USDC with card or crypto:`,
+          noUsdcKeyboard(MINIAPP_URL)
+        );
+        return;
       }
-    );
+
+      // No ETH for gas
+      if (ethBalance < 0.0001) {
+        await ctx.replyWithMarkdown(
+          `🌉 *Bridge USDC to Hyperliquid*\n\n` +
+          `⚠️ *No ETH for Gas*\n\n` +
+          `You have $${usdcBalance.toFixed(2)} USDC ready to bridge.\n` +
+          `But you need a tiny bit of ETH (~$0.01) for the transaction.\n\n` +
+          `Current ETH: ${ethBalance.toFixed(6)}`,
+          gasHelpKeyboard(MINIAPP_URL)
+        );
+        return;
+      }
+
+      // All good - show bridge button
+      await ctx.replyWithMarkdown(
+        `🌉 *Bridge USDC to Hyperliquid*\n\n` +
+        `💵 Available: $${usdcBalance.toFixed(2)} USDC\n` +
+        `⛽ Gas: ${ethBalance.toFixed(4)} ETH ✓\n\n` +
+        `Tap below to bridge instantly (~10 seconds):`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🌉 Bridge Now', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+              [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
+            ],
+          },
+        }
+      );
+    } catch (error) {
+      console.error('[Bridge] Error checking balances:', error);
+      await ctx.replyWithMarkdown(
+        `🌉 *Bridge USDC to Hyperliquid*\n\n` +
+        `Your wallet:\n\`${user.walletAddress}\`\n\n` +
+        `Tap below to bridge:`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🌉 Bridge Now', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+            ],
+          },
+        }
+      );
+    }
   });
 
   // /onramp command - open Mini App on onramp selector
@@ -673,30 +781,61 @@ export function registerHandlers(bot: Telegraf) {
       const hlWithdrawable = parseFloat(hlBalance.withdrawable || '0');
       const arbUsdc = arbBalance.usdc;
 
-      let message = `🏦 *Sell USDC*\n\n`;
-      message += `💎 *Hyperliquid:* $${hlWithdrawable.toFixed(2)} withdrawable\n`;
-      message += `🔷 *Arbitrum:* $${arbUsdc.toFixed(2)} USDC\n\n`;
-
       const buttons: any[][] = [];
 
-      if (hlWithdrawable >= 1) {
-        message += `_Step 1:_ Unbridge from Hyperliquid to Arbitrum\n`;
-        message += `_Step 2:_ Sell USDC to fiat\n\n`;
-        buttons.push([{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)}`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
+      // Primary case: Funds on HL but not on Arb - must unbridge first
+      if (hlWithdrawable >= 1 && arbUsdc < 1) {
+        const message = `🏦 *Sell USDC to Fiat*\n\n` +
+          `⚠️ *Your funds are on Hyperliquid*\n\n` +
+          `To sell to fiat, you need to:\n` +
+          `1️⃣ Unbridge from Hyperliquid → Arbitrum\n` +
+          `2️⃣ Sell USDC to fiat\n\n` +
+          `💎 *On Hyperliquid:* $${hlWithdrawable.toFixed(2)}\n` +
+          `🔷 *On Arbitrum:* $${arbUsdc.toFixed(2)}\n\n` +
+          `Tap below to start:`;
+        
+        await ctx.replyWithMarkdown(message, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)} First`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }],
+              [{ text: '« Back', callback_data: 'menu:main' }],
+            ],
+          },
+        });
+        return;
       }
 
+      // Case: USDC on Arbitrum ready to sell
       if (arbUsdc >= 1) {
+        const message = `🏦 *Sell USDC to Fiat*\n\n` +
+          `✅ You have $${arbUsdc.toFixed(2)} USDC ready to sell.\n\n` +
+          `💎 *On Hyperliquid:* $${hlWithdrawable.toFixed(2)}\n` +
+          `🔷 *On Arbitrum:* $${arbUsdc.toFixed(2)}\n\n` +
+          `Tap below to sell:`;
+
         buttons.push([{ text: '🏦 Sell USDC to Fiat', web_app: { url: `${MINIAPP_URL}?action=offramp` } }]);
+        if (hlWithdrawable >= 1) {
+          buttons.push([{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)} More`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
+        }
+        buttons.push([{ text: '« Back', callback_data: 'menu:main' }]);
+        
+        await ctx.replyWithMarkdown(message, {
+          reply_markup: { inline_keyboard: buttons },
+        });
+        return;
       }
 
-      if (buttons.length === 0) {
-        message += `⚠️ Minimum $1 required to sell.`;
-      }
-
-      buttons.push([{ text: '« Back', callback_data: 'menu:main' }]);
+      // Case: No funds anywhere
+      const message = `🏦 *Sell USDC to Fiat*\n\n` +
+        `⚠️ *No funds available*\n\n` +
+        `💎 *On Hyperliquid:* $${hlWithdrawable.toFixed(2)}\n` +
+        `🔷 *On Arbitrum:* $${arbUsdc.toFixed(2)}\n\n` +
+        `Minimum $1 required to sell.`;
 
       await ctx.replyWithMarkdown(message, {
-        reply_markup: { inline_keyboard: buttons },
+        reply_markup: {
+          inline_keyboard: [[{ text: '« Back', callback_data: 'menu:main' }]],
+        },
       });
     } catch (e: any) {
       console.error('[Offramp] Error:', e);
@@ -1189,7 +1328,29 @@ export function registerHandlers(bot: Telegraf) {
       case 'withdraw':
         await handleWithdrawAction(ctx);
         break;
+      case 'gas_drip':
+        await handleGasDrip(ctx);
+        break;
     }
+  });
+
+  // Position reversal confirmation handler
+  bot.action(/^reversal:confirm:(.+)$/, async (ctx) => {
+    const newSide = ctx.match[1] as 'long' | 'short';
+    await ctx.answerCbQuery();
+
+    // Continue with the trade flow after confirmation
+    const session: OrderContext = { side: newSide, step: 'select_size' };
+    const telegramId = BigInt(ctx.from!.id);
+    await updateSession(telegramId, session);
+
+    const sideEmoji = newSide === 'long' ? '📈' : '📉';
+    await ctx.editMessageText(
+      `${sideEmoji} *${newSide.toUpperCase()} ${TRADING_ASSET}*\n\n` +
+      `_This will close your current position first._\n\n` +
+      `Select size:`,
+      { parse_mode: 'Markdown', ...sizeSelectionKeyboard() }
+    );
   });
 
   // Size selection
@@ -1253,9 +1414,9 @@ export function registerHandlers(bot: Telegraf) {
 
     session.orderType = orderType;
     session.step = 'confirm';
-    await updateSession(telegramId, session);
 
     if (orderType === 'limit') {
+      await updateSession(telegramId, session);
       await ctx.editMessageText('Enter limit price (e.g., "2800"):');
       return;
     }
@@ -1266,6 +1427,11 @@ export function registerHandlers(bot: Telegraf) {
       hl.getGoldPrice(),
       user ? hl.getUserState(user.walletAddress) : Promise.resolve({ marginSummary: { accountValue: '0' } }),
     ]);
+    
+    // Store price at creation for drift detection
+    session.priceAtCreation = price;
+    await updateSession(telegramId, session);
+    
     const balance = parseFloat(state.marginSummary.accountValue);
     const summary = formatTradeCommand({
       side: session.side!,
@@ -1302,7 +1468,7 @@ export function registerHandlers(bot: Telegraf) {
       return;
     }
 
-    await ctx.editMessageText('⏳ Checking order...');
+      await ctx.editMessageText('⏳ Checking order...');
 
     try {
       const hl = await getHyperliquidClient();
@@ -1320,6 +1486,31 @@ export function registerHandlers(bot: Telegraf) {
         }
         await ctx.editMessageText(preCheck.message!, { parse_mode: 'Markdown', ...keyboard });
         return;
+      }
+
+      // Price drift check - warn if price moved >2% since order creation
+      if (session.priceAtCreation && session.orderType === 'market') {
+        const currentPrice = await hl.getGoldPrice();
+        const priceDrift = Math.abs((currentPrice - session.priceAtCreation) / session.priceAtCreation);
+        
+        if (priceDrift > 0.02) {
+          const driftPercent = (priceDrift * 100).toFixed(1);
+          const direction = currentPrice > session.priceAtCreation ? '📈 up' : '📉 down';
+          
+          // Store that we've shown the warning to not loop
+          session.priceAtCreation = currentPrice;
+          await updateSession(telegramId, session);
+          
+          await ctx.editMessageText(
+            `⚠️ *Price Moved*\n\n` +
+            `Price when you started: $${session.priceAtCreation.toLocaleString()}\n` +
+            `Current price: $${currentPrice.toLocaleString()}\n` +
+            `Change: ${direction} ${driftPercent}%\n\n` +
+            `Continue with order at current price?`,
+            { parse_mode: 'Markdown', ...confirmOrderKeyboard() }
+          );
+          return;
+        }
       }
 
       // Check builder fee approval before placing order
@@ -1392,22 +1583,43 @@ export function registerHandlers(bot: Telegraf) {
             },
           });
           
-          // Use trade receipt keyboard with share/copy buttons
-          const receiptKeyboard = tradeReceiptKeyboard({
+          // Prepare trade receipt params
+          const receiptParams = {
             side: session.side,
             sizeUsd: session.sizeUsd,
             leverage: session.leverage,
             entryPrice: avgPrice,
-          });
+          };
           
-          await ctx.editMessageText(
-            `✅ *Order Filled*\n\n` +
+          // First trade celebration!
+          if (isFirstTrade) {
+            await ctx.editMessageText(
+              `🎉 *First Trade Complete!*\n\n` +
+              `Welcome to gold trading on Hyperliquid!\n\n` +
               `${sideEmoji} *${session.side.toUpperCase()}* ${totalSz.toFixed(4)} ${TRADING_ASSET}\n` +
               `💵 Entry: $${avgPrice.toLocaleString()}\n` +
               `📊 Leverage: ${session.leverage}x\n` +
-              `💰 Notional: $${notionalUsd}`,
-            { parse_mode: 'Markdown', ...receiptKeyboard }
-          );
+              `💰 Notional: $${notionalUsd}\n\n` +
+              `💡 *Quick Tips:*\n` +
+              `• /chart — view price action\n` +
+              `• /close — exit your position\n` +
+              `• Share trades → earn ⭐ points\n\n` +
+              `Good luck! 🍀`,
+              { parse_mode: 'Markdown', ...firstTradeKeyboard(receiptParams) }
+            );
+          } else {
+            // Use trade receipt keyboard with share/copy buttons
+            const receiptKeyboard = tradeReceiptKeyboard(receiptParams);
+            
+            await ctx.editMessageText(
+              `✅ *Order Filled*\n\n` +
+                `${sideEmoji} *${session.side.toUpperCase()}* ${totalSz.toFixed(4)} ${TRADING_ASSET}\n` +
+                `💵 Entry: $${avgPrice.toLocaleString()}\n` +
+                `📊 Leverage: ${session.leverage}x\n` +
+                `💰 Notional: $${notionalUsd}`,
+              { parse_mode: 'Markdown', ...receiptKeyboard }
+            );
+          }
         } else if (response?.resting) {
           const sideEmoji = session.side === 'long' ? '📈' : '📉';
           await ctx.editMessageText(
@@ -1729,7 +1941,11 @@ export function registerHandlers(bot: Telegraf) {
       const result = await hl.cancelOrder(user.agentPrivateKey, user.walletAddress, orderId);
 
       if (result.status === 'ok') {
-        await ctx.editMessageText(`✅ Order #${orderId} cancelled.`, mainMenuKeyboard());
+        await ctx.editMessageText(
+          `✅ *Order #${orderId} cancelled*\n\n` +
+          `What would you like to do next?`,
+          { parse_mode: 'Markdown', ...postCancelKeyboard() }
+        );
       } else {
         await ctx.editMessageText(`❌ Failed to cancel: ${result.error}`, mainMenuKeyboard());
       }
@@ -1839,9 +2055,10 @@ async function handleSideSelection(ctx: Context, side: 'long' | 'short') {
   // Pre-check: ensure user has minimum balance to trade
   try {
     const hl = await getHyperliquidClient();
-    const [state, arbBalances] = await Promise.all([
+    const [state, arbBalances, position] = await Promise.all([
       hl.getUserState(user.walletAddress),
       getArbitrumBalances(user.walletAddress),
+      hl.getGoldPosition(user.walletAddress),
     ]);
     
     const hlBalance = parseFloat(state.marginSummary.accountValue);
@@ -1869,6 +2086,30 @@ async function handleSideSelection(ctx: Context, side: 'long' | 'short') {
         { parse_mode: 'Markdown', ...fundPromptKeyboard(MINIAPP_URL) }
       );
       return;
+    }
+
+    // Case 3: Position reversal warning (user has LONG and is trying to SHORT, or vice versa)
+    if (position && parseFloat(position.position.szi) !== 0) {
+      const positionSize = parseFloat(position.position.szi);
+      const currentSide = positionSize > 0 ? 'long' : 'short';
+      
+      if (currentSide !== side) {
+        const pnl = parseFloat(position.position.unrealizedPnl);
+        const pnlEmoji = pnl >= 0 ? '🟢' : '🔴';
+        const pnlSign = pnl >= 0 ? '+' : '';
+        const absSize = Math.abs(positionSize);
+        
+        await ctx.reply(
+          `⚠️ *Position Reversal*\n\n` +
+          `You have an open *${currentSide.toUpperCase()}* position:\n` +
+          `📊 Size: ${absSize.toFixed(4)} ${TRADING_ASSET}\n` +
+          `${pnlEmoji} PnL: ${pnlSign}$${pnl.toFixed(2)}\n\n` +
+          `Opening a *${side.toUpperCase()}* will first close your current position.\n\n` +
+          `Continue?`,
+          { parse_mode: 'Markdown', ...confirmReversalKeyboard(side) }
+        );
+        return;
+      }
     }
   } catch (error) {
     console.error('[PreTradeCheck] Error in handleSideSelection:', error);
@@ -2002,7 +2243,11 @@ async function handleCancelAllOrders(ctx: Context) {
     const hl = await getHyperliquidClient();
 
     await hl.cancelAllOrders(user.agentPrivateKey, user.walletAddress);
-    await ctx.editMessageText('✅ All orders cancelled.', mainMenuKeyboard());
+    await ctx.editMessageText(
+      `✅ *All orders cancelled*\n\n` +
+      `What would you like to do next?`,
+      { parse_mode: 'Markdown', ...postCancelKeyboard() }
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     await ctx.editMessageText(`❌ Error: ${message}`, mainMenuKeyboard());
@@ -2214,6 +2459,79 @@ async function handleDepositHelp(ctx: Context) {
       },
     }
   );
+}
+
+/**
+ * Handle gas drip request - sends small amount of ETH for gas
+ */
+async function handleGasDrip(ctx: Context) {
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+  
+  if (!user) {
+    await ctx.editMessageText('Please connect your wallet first.');
+    return;
+  }
+  
+  try {
+    // Call the gas drip endpoint
+    const API_URL = process.env.API_URL || 'http://localhost:3001';
+    const response = await fetch(`${API_URL}/api/gas-drip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: user.walletAddress }),
+    });
+    
+    if (response.ok) {
+      await ctx.editMessageText(
+        `⛽ *Gas Sent!*\n\n` +
+        `A small amount of ETH for gas has been sent to your wallet.\n` +
+        `It should arrive in ~30 seconds.\n\n` +
+        `Wallet: \`${user.walletAddress}\`\n\n` +
+        `_You can now bridge your USDC._`,
+        { 
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🌉 Bridge Now', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+              [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
+            ],
+          },
+        }
+      );
+    } else {
+      const err = await response.json();
+      await ctx.editMessageText(
+        `⚠️ *Gas Drip Unavailable*\n\n` +
+        `${err.error || 'Unable to send gas right now.'}\n\n` +
+        `Try buying ETH directly:`,
+        { 
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '💳 Buy ETH', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+              [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
+            ],
+          },
+        }
+      );
+    }
+  } catch (error) {
+    console.error('[GasDrip] Error:', error);
+    await ctx.editMessageText(
+      `⚠️ *Gas Drip Error*\n\n` +
+      `Something went wrong. Try buying ETH directly:`,
+      { 
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💳 Buy ETH', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+            [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
+          ],
+        },
+      }
+    );
+  }
 }
 
 /**

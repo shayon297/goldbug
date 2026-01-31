@@ -1063,6 +1063,51 @@ async function main() {
     }
   });
 
+  // Bridge completion - called by Mini App after successful bridge
+  app.post('/api/bridge-complete', registrationLimiter, async (req: Request, res: Response) => {
+    try {
+      const { telegramUserId, amount } = req.body;
+      
+      if (!telegramUserId) {
+        res.status(400).json({ error: 'Missing telegramUserId' });
+        return;
+      }
+
+      console.log(`[BridgeComplete] User ${telegramUserId} bridged $${amount}`);
+
+      // Send notification to user that they're ready to trade
+      try {
+        const amountStr = amount ? `$${parseFloat(amount).toFixed(2)}` : 'Your USDC';
+        
+        await bot.telegram.sendMessage(
+          Number(telegramUserId),
+          `✅ *Bridge Complete!*\n\n` +
+          `${amountStr} is now on Hyperliquid.\n\n` +
+          `You're ready to trade gold! 🥇`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '📈 Long', callback_data: 'action:long' },
+                  { text: '📉 Short', callback_data: 'action:short' },
+                ],
+                [{ text: '📊 View Chart', callback_data: 'action:chart' }],
+              ],
+            },
+          }
+        );
+      } catch (telegramError) {
+        console.error('[BridgeComplete] Failed to send Telegram message:', telegramError);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[BridgeComplete] Error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // Error handler
   app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     console.error('[Server] Error:', err);

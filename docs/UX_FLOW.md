@@ -82,9 +82,63 @@ When user clicks a shared trade link:
 
 | User State | Bot Response |
 |------------|--------------|
+| User not registered | Special welcome showing trade details + Create wallet button |
 | Needs to bridge | `⚠️ *Bridge Required*` + Bridge button |
 | Insufficient funds | `⚠️ *Insufficient Funds*` with required vs available margin |
 | Sufficient funds | Show trade confirmation |
+
+### Bridge Command Pre-Checks
+
+When user runs `/bridge`:
+
+| User State | Bot Response |
+|------------|--------------|
+| $0 USDC on Arbitrum | `⚠️ *No USDC on Arbitrum*` + Buy USDC button |
+| USDC but no ETH for gas | `⚠️ *No ETH for Gas*` + Gas drip button |
+| Ready to bridge | Shows balance summary + Bridge Now button |
+
+### Position Reversal Warning
+
+When user tries to open opposite side of existing position:
+
+| Current Position | User Action | Bot Response |
+|-----------------|-------------|--------------|
+| LONG | `/short` | `⚠️ *Position Reversal*` warning showing current PnL + confirm button |
+| SHORT | `/long` | `⚠️ *Position Reversal*` warning showing current PnL + confirm button |
+
+### Price Drift Warning
+
+When confirming market order after delay:
+
+| Condition | Bot Response |
+|-----------|--------------|
+| Price moved >2% since order started | `⚠️ *Price Moved*` showing old vs new price + Continue button |
+
+### First Trade Celebration
+
+Special message for user's first ever trade:
+
+```
+🎉 *First Trade Complete!*
+
+Welcome to gold trading on Hyperliquid!
+
+📈 *LONG* 0.0350 xyz:GOLD
+💵 Entry: $2,850.00
+📊 Leverage: 5x
+💰 Notional: $100.00
+
+💡 *Quick Tips:*
+• /chart — view price action
+• /close — exit your position
+• Share trades → earn ⭐ points
+
+Good luck! 🍀
+
+[📤 Share First Trade!]
+[📊 View Chart]
+[🏠 Main Menu]
+```
 
 ### Dashboard Context
 
@@ -121,6 +175,29 @@ Goldbug gives you:
 2️⃣ Fund with card or crypto
 3️⃣ Bridge to Hyperliquid
 4️⃣ Trade gold
+
+👇 *Tap below to start*
+
+[🚀 Start Trading] (opens Mini App)
+```
+
+#### New User from Shared Trade Link
+**Condition:** New user clicked a deep link like `?start=trade_L_100_10_m`
+
+```
+📈 *Someone shared a trade with you!*
+
+*LONG* xyz:GOLD
+💵 Size: $100
+📊 Leverage: 10x
+
+━━━━━━━━━━━━━━━━━━━━
+*Create your wallet to copy this trade!*
+
+Setup takes 30 seconds:
+1️⃣ Create wallet
+2️⃣ Fund with card/crypto
+3️⃣ Copy the trade
 
 👇 *Tap below to start*
 
@@ -195,29 +272,38 @@ Points unlock future bonuses & discounts
 
 ### `/status` / `/balance`
 
+Shows account summary with **contextual action buttons**:
+
+**With open position:**
 ```
 🏦 *Wallet*
-`0x92d00db3758ed00ebe97594ab924f5dace0e176d`
+`0x92d00db3...`
+...
 
-💎 *Hyperliquid*
-💰 Balance: $XX.XX
-💵 Withdrawable: $XX.XX
+[🔴 Close Position]
+[📈 Add Long] [📉 Add Short]
+[📊 View Chart]
+```
 
-🔷 *Arbitrum*
-💵 USDC: $XX.XX
-⛽ ETH: 0.0000
+**With balance, no position:**
+```
+...
+[📈 Long] [📉 Short]
+[📊 View Chart]
+```
 
-📊 *xyz:GOLD Position*
-📈 LONG 0.0001 xyz:GOLD @ 10x
-Entry: $2800.00
-🟢 PnL: $5.00
+**Low balance, funds on Arbitrum:**
+```
+...
+[🌉 Bridge USDC to Trade]
+[📊 View Balance]
+```
 
-💲 *xyz:GOLD Price*: $2850.00
-
-⭐ *Goldbug Points*: 150
-_Share trades to earn rewards_
-
-[💳 Buy USDC] [🌉 Bridge] [🔄 Refresh]
+**No funds anywhere:**
+```
+...
+[💳 Fund Account]
+[📋 How to Fund]
 ```
 
 ---
@@ -441,15 +527,51 @@ Open a position to get started.
 
 ### `/bridge`
 
+**Pre-checks before showing bridge:**
+
+**No USDC on Arbitrum:**
 ```
 🌉 *Bridge USDC to Hyperliquid*
 
-Your wallet:
-`0x92d00db3758ed00ebe97594ab924f5dace0e176d`
+⚠️ *No USDC on Arbitrum*
 
-Tap the button below to bridge your USDC from Arbitrum to Hyperliquid instantly.
+You need USDC on Arbitrum first.
+Current balance: $0.00
+
+Buy USDC with card or crypto:
+
+[💳 Buy USDC]
+[📋 How to Fund]
+[🏠 Main Menu]
+```
+
+**No ETH for gas:**
+```
+🌉 *Bridge USDC to Hyperliquid*
+
+⚠️ *No ETH for Gas*
+
+You have $50.00 USDC ready to bridge.
+But you need a tiny bit of ETH (~$0.01) for the transaction.
+
+Current ETH: 0.000000
+
+[⛽ Request Gas Drip]
+[💳 Buy ETH]
+[🏠 Main Menu]
+```
+
+**Ready to bridge:**
+```
+🌉 *Bridge USDC to Hyperliquid*
+
+💵 Available: $50.00 USDC
+⛽ Gas: 0.0012 ETH ✓
+
+Tap below to bridge instantly (~10 seconds):
 
 [🌉 Bridge Now] (opens Mini App → bridge)
+[🏠 Main Menu]
 ```
 
 ---
@@ -469,17 +591,40 @@ KYC may be required depending on your region.
 
 ### `/withdraw` / `/offramp`
 
+**Contextual display based on fund location:**
+
+**Funds on Hyperliquid but not Arbitrum (most common):**
 ```
-🏦 *Withdraw to Bank*
+🏦 *Sell USDC to Fiat*
 
-💎 *Hyperliquid:* $150.00 withdrawable
-🔷 *Arbitrum:* $25.00 USDC
+⚠️ *Your funds are on Hyperliquid*
 
-_Step 1:_ Unbridge from Hyperliquid to Arbitrum
-_Step 2:_ Sell USDC to fiat
+To sell to fiat, you need to:
+1️⃣ Unbridge from Hyperliquid → Arbitrum
+2️⃣ Sell USDC to fiat
 
-[📤 Unbridge $150.00]
-[🏦 Sell USDC to Fiat] (opens Mini App → offramp)
+💎 *On Hyperliquid:* $150.00
+🔷 *On Arbitrum:* $0.00
+
+Tap below to start:
+
+[📤 Unbridge $150.00 First]
+[« Back]
+```
+
+**Ready to sell (USDC on Arbitrum):**
+```
+🏦 *Sell USDC to Fiat*
+
+✅ You have $50.00 USDC ready to sell.
+
+💎 *On Hyperliquid:* $100.00
+🔷 *On Arbitrum:* $50.00
+
+Tap below to sell:
+
+[🏦 Sell USDC to Fiat]
+[📤 Unbridge $100.00 More]
 [« Back]
 ```
 
@@ -500,12 +645,18 @@ $150.00 USDC is being transferred to Arbitrum.
 [🔄 Refresh Balance]
 ```
 
-**If only Arbitrum has funds (HL withdrawable < $1):**
-Only shows `[🏦 Sell USDC to Fiat]` button.
-
-**If neither has $1+:**
+**No funds anywhere:**
 ```
-⚠️ Minimum $1 required to withdraw.
+🏦 *Sell USDC to Fiat*
+
+⚠️ *No funds available*
+
+💎 *On Hyperliquid:* $0.00
+🔷 *On Arbitrum:* $0.00
+
+Minimum $1 required to sell.
+
+[« Back]
 ```
 
 ---
@@ -682,7 +833,24 @@ Shows open orders (see `/orders`)
 
 #### `action:cancel_all`
 ```
-✅ All orders cancelled.
+✅ *All orders cancelled*
+
+What would you like to do next?
+
+[📈 New Long] [📉 New Short]
+[📊 View Position]
+[🏠 Main Menu]
+```
+
+#### `cancel_order:12345`
+```
+✅ *Order #12345 cancelled*
+
+What would you like to do next?
+
+[📈 New Long] [📉 New Short]
+[📊 View Position]
+[🏠 Main Menu]
 ```
 
 ---
@@ -772,6 +940,45 @@ Shows full account summary (see `/status`)
 
 #### `action:chart`
 Generates and sends chart (see `/chart`)
+
+#### `action:gas_drip`
+Requests small amount of ETH for gas:
+```
+⛽ *Gas Sent!*
+
+A small amount of ETH for gas has been sent to your wallet.
+It should arrive in ~30 seconds.
+
+Wallet: `0x92d00db3...`
+
+_You can now bridge your USDC._
+
+[🌉 Bridge Now]
+[🏠 Main Menu]
+```
+
+**If gas drip unavailable:**
+```
+⚠️ *Gas Drip Unavailable*
+
+[reason]
+
+Try buying ETH directly:
+
+[💳 Buy ETH]
+[🏠 Main Menu]
+```
+
+#### `reversal:confirm:long` / `reversal:confirm:short`
+Confirms position reversal and proceeds to order flow:
+```
+📈 *LONG xyz:GOLD*
+
+_This will close your current position first._
+
+Select size:
+[$25] [$50] [$100]...
+```
 
 ---
 
@@ -915,6 +1122,19 @@ Bridge it to Hyperliquid to start trading:
 
 [🌉 Bridge to Hyperliquid]
 [📊 Check Balance]
+```
+
+### Bridge Completion
+After successful bridge from Mini App:
+```
+✅ *Bridge Complete!*
+
+$50.00 is now on Hyperliquid.
+
+You're ready to trade gold! 🥇
+
+[📈 Long] [📉 Short]
+[📊 View Chart]
 ```
 
 ---

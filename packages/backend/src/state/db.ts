@@ -184,6 +184,8 @@ export interface OrderContext {
   orderType?: 'market' | 'limit';
   limitPrice?: number;
   step: 'idle' | 'select_side' | 'select_size' | 'select_leverage' | 'select_type' | 'confirm';
+  // Track price at order creation for drift warning
+  priceAtCreation?: number;
   // Pending order for auto-retry after authorization
   pendingOrder?: {
     side: 'long' | 'short';
