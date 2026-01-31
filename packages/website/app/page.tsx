@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://goldbug-production.up.railway.app';
-const BOT_LINK = process.env.NEXT_PUBLIC_BOT_LINK || 'https://t.me/goldbug_xyz_bot';
+const BOT_LINK = process.env.NEXT_PUBLIC_BOT_LINK || 'https://t.me/goldbug_tradingbot';
 const WEBSITE_LINK = process.env.NEXT_PUBLIC_WEBSITE_LINK || 'https://goldbug.app';
 const SUPPORT_LINK = process.env.NEXT_PUBLIC_SUPPORT_LINK || 'https://t.me/goldbug_support';
 const DOCS_LINK = process.env.NEXT_PUBLIC_DOCS_LINK || 'https://docs.goldbug.app';

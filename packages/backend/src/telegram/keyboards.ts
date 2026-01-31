@@ -253,3 +253,99 @@ export function copiedTradeKeyboard() {
   ]);
 }
 
+// ============================================
+// Contextual UX Keyboards
+// ============================================
+
+/**
+ * Prompt to bridge when user has funds on Arbitrum but not Hyperliquid
+ */
+export function bridgePromptKeyboard(miniAppUrl: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.webApp('🌉 Bridge USDC Now', `${miniAppUrl}?action=bridge`)],
+    [Markup.button.callback('📊 Check Balance', 'action:refresh')],
+    [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+
+/**
+ * Prompt to fund when user has no funds anywhere
+ */
+export function fundPromptKeyboard(miniAppUrl: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.webApp('💳 Buy USDC', `${miniAppUrl}?action=onramp`)],
+    [Markup.button.callback('📋 How to Fund', 'action:deposit_help')],
+    [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+
+/**
+ * Prompt when order size exceeds available margin
+ */
+export function insufficientMarginKeyboard(miniAppUrl: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('📉 Use Smaller Size', 'action:long')],
+    [Markup.button.webApp('💳 Add More Funds', `${miniAppUrl}?action=onramp`)],
+    [Markup.button.callback('🏠 Main Menu', 'action:menu')],
+  ]);
+}
+
+/**
+ * Post-close keyboard with optional withdraw prompt for profits
+ */
+export function postCloseKeyboard(showWithdraw: boolean) {
+  const buttons: ReturnType<typeof Markup.button.callback>[][] = [];
+  
+  if (showWithdraw) {
+    buttons.push([Markup.button.callback('💰 Withdraw Profit', 'action:withdraw')]);
+  }
+  
+  buttons.push([
+    Markup.button.callback('📈 New Trade', 'action:long'),
+    Markup.button.callback('📉 Short', 'action:short'),
+  ]);
+  buttons.push([Markup.button.callback('🏠 Main Menu', 'action:menu')]);
+  
+  return Markup.inlineKeyboard(buttons);
+}
+
+/**
+ * Post-bridge keyboard prompting user to start trading
+ */
+export function postBridgeKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('📈 Long Gold', 'action:long'),
+      Markup.button.callback('📉 Short Gold', 'action:short'),
+    ],
+    [Markup.button.callback('📊 Check Balance', 'action:refresh')],
+  ]);
+}
+
+/**
+ * Post-onramp keyboard prompting user to bridge
+ */
+export function postOnrampKeyboard(miniAppUrl: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.webApp('🌉 Bridge to Hyperliquid', `${miniAppUrl}?action=bridge`)],
+    [Markup.button.callback('📊 Check Balance', 'action:refresh')],
+  ]);
+}
+
+/**
+ * Low balance dashboard - prominently shows funding options
+ */
+export function lowBalanceDashboardKeyboard(miniAppUrl: string, hasArbFunds: boolean) {
+  if (hasArbFunds) {
+    return Markup.inlineKeyboard([
+      [Markup.button.webApp('🌉 Bridge USDC to Trade', `${miniAppUrl}?action=bridge`)],
+      [Markup.button.callback('📊 View Balance', 'action:details')],
+    ]);
+  }
+  
+  return Markup.inlineKeyboard([
+    [Markup.button.webApp('💳 Fund Account', `${miniAppUrl}?action=onramp`)],
+    [Markup.button.callback('📋 How to Fund', 'action:deposit_help')],
+  ]);
+}
+

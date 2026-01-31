@@ -42,6 +42,62 @@ Use /bridge to move it to Hyperliquid
 
 ---
 
+## Pre-Check System (Proactive Guidance)
+
+The bot implements proactive checks at every step to guide users before they hit errors.
+
+### Trade Entry Pre-Checks
+
+When user taps Long/Short or types a trade command:
+
+| User State | Bot Response |
+|------------|--------------|
+| $0 on HL, $50+ on Arb | `⚠️ *Bridge Required*` + Bridge button |
+| $0 on HL, $0 on Arb | `💰 *Fund Your Account*` + Buy USDC button |
+| Has funds | Proceed to size selection |
+
+### Order Confirmation Pre-Checks
+
+When user confirms an order:
+
+| User State | Bot Response |
+|------------|--------------|
+| Balance < required margin | `⚠️ *Insufficient Margin*` with options to reduce size or add funds |
+| Balance OK, builder fee not approved | `🔒 *One-Time Setup*` with approval button |
+| Balance OK, all approved | Execute order |
+
+### Withdraw Pre-Checks
+
+When user tries to withdraw:
+
+| User State | Bot Response |
+|------------|--------------|
+| Funds locked in position | `⚠️ *Funds Locked in Position*` + Close Position button |
+| Has withdrawable funds | Show unbridge button |
+| Has USDC on Arbitrum | Show Sell to Fiat button |
+
+### Deep Link Trade Pre-Checks
+
+When user clicks a shared trade link:
+
+| User State | Bot Response |
+|------------|--------------|
+| Needs to bridge | `⚠️ *Bridge Required*` + Bridge button |
+| Insufficient funds | `⚠️ *Insufficient Funds*` with required vs available margin |
+| Sufficient funds | Show trade confirmation |
+
+### Dashboard Context
+
+The dashboard adapts based on user state:
+
+| User State | Dashboard Shows |
+|------------|-----------------|
+| Low balance + Arb funds | `⚠️ *Bridge your $X USDC to trade!*` + Bridge button |
+| Low balance + no funds | `⚠️ *Fund your account to start trading*` + Fund button |
+| Normal balance | Standard Long/Short/Position buttons |
+
+---
+
 ## Commands
 
 ### `/start`
@@ -577,12 +633,31 @@ Shows close confirmation (see `/close`)
 2. Executes market close
 3. Result:
 
-**Filled:**
+**Filled (with profit):**
 ```
 ✅ *Position Closed*
 
 Size: 0.0350 xyz:GOLD
 Close Price: $2860.00
+🟢 *Realized PnL: +$25.00*
+
+💰 Withdraw your profit to bank?
+
+[💰 Withdraw Profit]
+[📈 New Trade] [📉 Short]
+[🏠 Main Menu]
+```
+
+**Filled (no profit):**
+```
+✅ *Position Closed*
+
+Size: 0.0350 xyz:GOLD
+Close Price: $2860.00
+🔴 *Realized PnL: -$10.00*
+
+[📈 New Trade] [📉 Short]
+[🏠 Main Menu]
 ```
 
 **Resting (limit):**

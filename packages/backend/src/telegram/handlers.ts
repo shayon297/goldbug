@@ -18,6 +18,11 @@ import {
   approveBuilderFeeKeyboard,
   tradeReceiptKeyboard,
   copiedTradeKeyboard,
+  bridgePromptKeyboard,
+  fundPromptKeyboard,
+  insufficientMarginKeyboard,
+  postCloseKeyboard,
+  lowBalanceDashboardKeyboard,
 } from './keyboards.js';
 import { 
   parseTradeCommand, 
@@ -46,6 +51,96 @@ import { generateChartBuffer, generateChartSummary } from '../services/chart.js'
 const MINIAPP_URL = process.env.MINIAPP_URL || 'https://goldbug-miniapp.railway.app';
 const BUILDER_ADDRESS = process.env.BUILDER_ADDRESS || '';
 const BOT_USERNAME = process.env.BOT_USERNAME || 'goldbug_tradingbot';
+const MIN_TRADE_BALANCE = 10; // Minimum $10 to trade
+
+/**
+ * Pre-trade check result for UX guidance
+ */
+interface PreTradeCheckResult {
+  canTrade: boolean;
+  hlBalance: number;
+  arbBalance: number;
+  requiredMargin: number;
+  message?: string;
+  action?: 'bridge' | 'fund' | 'reduce_size';
+}
+
+/**
+ * Check if user can trade and provide guidance if not
+ */
+async function getPreTradeCheck(
+  walletAddress: string,
+  sizeUsd: number,
+  leverage: number
+): Promise<PreTradeCheckResult> {
+  const hl = await getHyperliquidClient();
+  
+  const [state, arbBalances] = await Promise.all([
+    hl.getUserState(walletAddress),
+    getArbitrumBalances(walletAddress),
+  ]);
+  
+  const hlBalance = parseFloat(state.marginSummary.accountValue);
+  const arbBalance = parseFloat(arbBalances.usdc);
+  const requiredMargin = sizeUsd / leverage;
+  
+  // Case 1: No funds on Hyperliquid, but has funds on Arbitrum → bridge
+  if (hlBalance < MIN_TRADE_BALANCE && arbBalance >= 5) {
+    return {
+      canTrade: false,
+      hlBalance,
+      arbBalance,
+      requiredMargin,
+      message: `⚠️ *Bridge Required*\n\n` +
+        `You have $${arbBalance.toFixed(2)} USDC on Arbitrum.\n` +
+        `Bridge it to Hyperliquid to start trading.\n\n` +
+        `💡 _This takes ~10 seconds_`,
+      action: 'bridge',
+    };
+  }
+  
+  // Case 2: No funds anywhere → fund
+  if (hlBalance < MIN_TRADE_BALANCE) {
+    return {
+      canTrade: false,
+      hlBalance,
+      arbBalance,
+      requiredMargin,
+      message: `💰 *Fund Your Account*\n\n` +
+        `Minimum $${MIN_TRADE_BALANCE} required to trade.\n` +
+        `Current balance: $${hlBalance.toFixed(2)}\n\n` +
+        `Buy USDC with card or crypto:`,
+      action: 'fund',
+    };
+  }
+  
+  // Case 3: Insufficient margin for this specific order
+  if (hlBalance < requiredMargin) {
+    const maxSizeAtLeverage = Math.floor(hlBalance * leverage);
+    return {
+      canTrade: false,
+      hlBalance,
+      arbBalance,
+      requiredMargin,
+      message: `⚠️ *Insufficient Margin*\n\n` +
+        `Order requires ~$${requiredMargin.toFixed(0)} margin.\n` +
+        `Your balance: $${hlBalance.toFixed(2)}\n\n` +
+        `Options:\n` +
+        `• Trade up to $${maxSizeAtLeverage} at ${leverage}x\n` +
+        `• Add more funds`,
+      action: 'reduce_size',
+    };
+  }
+  
+  // All checks passed
+  return {
+    canTrade: true,
+    hlBalance,
+    arbBalance,
+    requiredMargin,
+  };
+}
+
 /**
  * Check if user has existing position with different leverage (for warning)
  */
@@ -209,26 +304,52 @@ export function registerHandlers(bot: Telegraf) {
     // Handle trade deep link - show prefilled trade confirmation
     if (deepLink.type === 'trade' && deepLink.trade) {
       const { side, sizeUsd, leverage, orderType } = deepLink.trade;
-      
-      // Store in session for confirmation
-      const session: OrderContext = {
-        side,
-        sizeUsd,
-        leverage,
-        orderType,
-        step: 'confirm',
-      };
-      await updateSession(telegramId, session);
 
       try {
         const hl = await getHyperliquidClient();
-        const [price, state] = await Promise.all([
+        const [price, state, arbBalances] = await Promise.all([
           hl.getGoldPrice(),
           hl.getUserState(user.walletAddress),
+          getArbitrumBalances(user.walletAddress),
         ]);
         const balance = parseFloat(state.marginSummary.accountValue);
+        const arbUsdc = parseFloat(arbBalances.usdc);
+        const requiredMargin = sizeUsd / leverage;
         
-        const sideEmoji = side === 'long' ? '📈' : '📉';
+        // Pre-check balance before showing trade
+        if (balance < MIN_TRADE_BALANCE && arbUsdc >= 5) {
+          await ctx.replyWithMarkdown(
+            `📋 *Shared Trade*\n\n` +
+            `⚠️ *Bridge Required*\n\n` +
+            `You have $${arbUsdc.toFixed(2)} on Arbitrum.\n` +
+            `Bridge it to Hyperliquid first to copy this trade.`,
+            bridgePromptKeyboard(MINIAPP_URL)
+          );
+          return;
+        }
+        
+        if (balance < requiredMargin) {
+          await ctx.replyWithMarkdown(
+            `📋 *Shared Trade*\n\n` +
+            `⚠️ *Insufficient Funds*\n\n` +
+            `This trade requires ~$${requiredMargin.toFixed(0)} margin.\n` +
+            `Your balance: $${balance.toFixed(2)}\n\n` +
+            `Fund your account to copy this trade:`,
+            fundPromptKeyboard(MINIAPP_URL)
+          );
+          return;
+        }
+        
+        // Store in session for confirmation
+        const session: OrderContext = {
+          side,
+          sizeUsd,
+          leverage,
+          orderType,
+          step: 'confirm',
+        };
+        await updateSession(telegramId, session);
+        
         const summary = formatTradeCommand({ side, sizeUsd, leverage, orderType }, price, balance);
         
         await ctx.replyWithMarkdown(
@@ -253,13 +374,16 @@ export function registerHandlers(bot: Telegraf) {
       const hl = await getHyperliquidClient();
       
       // Fetch all data in parallel
-      const [state, position, price] = await Promise.all([
+      const [state, position, price, arbBalances] = await Promise.all([
         hl.getUserState(user.walletAddress),
         hl.getGoldPosition(user.walletAddress),
         hl.getGoldPrice(),
+        getArbitrumBalances(user.walletAddress),
       ]);
 
-      const balance = parseFloat(state.marginSummary.accountValue).toFixed(2);
+      const balanceNum = parseFloat(state.marginSummary.accountValue);
+      const balance = balanceNum.toFixed(2);
+      const arbUsdc = parseFloat(arbBalances.usdc);
       const hasPosition = !!(position && parseFloat(position.position.szi) !== 0);
 
       // Build compact dashboard
@@ -278,14 +402,26 @@ export function registerHandlers(bot: Telegraf) {
       const orders = await hl.getOpenOrders(user.walletAddress);
       const ordersText = orders.length > 0 ? `${orders.length} open` : 'none';
 
-      const dashboard = 
+      let dashboard = 
         `🥇 *${TRADING_ASSET} Trading Bot*\n\n` +
         `💰 *Balance:* $${balance}\n` +
         `📊 *Position:* ${positionText}\n` +
         `📋 *Orders:* ${ordersText}\n` +
         `💲 *Price:* $${price.toFixed(2)}`;
 
-      await ctx.replyWithMarkdown(dashboard, dashboardKeyboard(hasPosition, MINIAPP_URL));
+      // Low balance warning with contextual action
+      const isLowBalance = balanceNum < MIN_TRADE_BALANCE;
+      const hasArbFunds = arbUsdc >= 5;
+      
+      if (isLowBalance && hasArbFunds) {
+        dashboard += `\n\n⚠️ *Bridge your $${arbUsdc.toFixed(0)} USDC to trade!*`;
+        await ctx.replyWithMarkdown(dashboard, lowBalanceDashboardKeyboard(MINIAPP_URL, true));
+      } else if (isLowBalance && !hasPosition) {
+        dashboard += `\n\n⚠️ *Fund your account to start trading*`;
+        await ctx.replyWithMarkdown(dashboard, lowBalanceDashboardKeyboard(MINIAPP_URL, false));
+      } else {
+        await ctx.replyWithMarkdown(dashboard, dashboardKeyboard(hasPosition, MINIAPP_URL));
+      }
     } catch (error) {
       await ctx.replyWithMarkdown(
         `🥇 *${TRADING_ASSET} Trading Bot*\n\n` +
@@ -580,13 +716,16 @@ export function registerHandlers(bot: Telegraf) {
 
     try {
       const hl = await getHyperliquidClient();
-      const [hlBalance, arbBalance] = await Promise.all([
+      const [hlBalance, arbBalance, position] = await Promise.all([
         hl.getAccountBalance(user.walletAddress),
         hl.getArbitrumBalance(user.walletAddress),
+        hl.getGoldPosition(user.walletAddress),
       ]);
 
       const hlWithdrawable = parseFloat(hlBalance.withdrawable || '0');
+      const hlTotal = parseFloat(hlBalance.balance?.toString() || '0');
       const arbUsdc = arbBalance.usdc;
+      const hasPosition = position && parseFloat(position.position.szi) !== 0;
 
       // Show balances on both chains
       let message = `🏦 *Withdraw to Bank*\n\n`;
@@ -595,7 +734,19 @@ export function registerHandlers(bot: Telegraf) {
 
       const buttons: any[][] = [];
 
-      if (hlWithdrawable >= 1) {
+      // Check if funds are locked in position
+      if (hlWithdrawable < 1 && hlTotal > 10 && hasPosition) {
+        const positionSize = Math.abs(parseFloat(position.position.szi));
+        const entryPrice = parseFloat(position.position.entryPx);
+        const pnl = parseFloat(position.position.unrealizedPnl);
+        const notional = (positionSize * entryPrice).toFixed(2);
+        
+        message += `⚠️ *Funds Locked in Position*\n`;
+        message += `You have ~$${notional} in your ${pnl >= 0 ? 'profitable' : ''} position.\n`;
+        message += `Close it first to withdraw.\n\n`;
+        
+        buttons.push([{ text: '🔴 Close Position to Withdraw', callback_data: 'action:close' }]);
+      } else if (hlWithdrawable >= 1) {
         message += `_Step 1:_ Unbridge from Hyperliquid to Arbitrum\n`;
         message += `_Step 2:_ Sell USDC to fiat\n\n`;
         buttons.push([{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)}`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
@@ -1032,6 +1183,12 @@ export function registerHandlers(bot: Telegraf) {
       case 'chart':
         await handleChart(ctx);
         break;
+      case 'deposit_help':
+        await handleDepositHelp(ctx);
+        break;
+      case 'withdraw':
+        await handleWithdrawAction(ctx);
+        break;
     }
   });
 
@@ -1149,6 +1306,21 @@ export function registerHandlers(bot: Telegraf) {
 
     try {
       const hl = await getHyperliquidClient();
+
+      // Pre-trade balance check - ensure user has sufficient funds
+      const preCheck = await getPreTradeCheck(user.walletAddress, session.sizeUsd, session.leverage);
+      if (!preCheck.canTrade) {
+        let keyboard;
+        if (preCheck.action === 'bridge') {
+          keyboard = bridgePromptKeyboard(MINIAPP_URL);
+        } else if (preCheck.action === 'fund') {
+          keyboard = fundPromptKeyboard(MINIAPP_URL);
+        } else {
+          keyboard = insufficientMarginKeyboard(MINIAPP_URL);
+        }
+        await ctx.editMessageText(preCheck.message!, { parse_mode: 'Markdown', ...keyboard });
+        return;
+      }
 
       // Check builder fee approval before placing order
       if (BUILDER_ADDRESS) {
@@ -1380,12 +1552,28 @@ export function registerHandlers(bot: Telegraf) {
         console.log(`[Close] Response status:`, JSON.stringify(response, null, 2));
         
         if (response?.filled) {
-          await ctx.editMessageText(
-            `✅ *Position Closed*\n\n` +
-              `Size: ${response.filled.totalSz} ${TRADING_ASSET}\n` +
-              `Close Price: $${response.filled.avgPx}`,
-            { parse_mode: 'Markdown', ...mainMenuKeyboard() }
-          );
+          // Calculate realized PnL for profit prompt
+          const closedPnl = parseFloat(response.filled.closedPnl || '0');
+          const hasProfit = closedPnl > 1; // Only prompt for > $1 profit
+          
+          let closeMessage = `✅ *Position Closed*\n\n` +
+            `Size: ${response.filled.totalSz} ${TRADING_ASSET}\n` +
+            `Close Price: $${response.filled.avgPx}`;
+          
+          if (closedPnl !== 0) {
+            const pnlEmoji = closedPnl >= 0 ? '🟢' : '🔴';
+            const pnlSign = closedPnl >= 0 ? '+' : '';
+            closeMessage += `\n${pnlEmoji} *Realized PnL: ${pnlSign}$${closedPnl.toFixed(2)}*`;
+          }
+          
+          if (hasProfit) {
+            closeMessage += `\n\n💰 Withdraw your profit to bank?`;
+          }
+          
+          await ctx.editMessageText(closeMessage, { 
+            parse_mode: 'Markdown', 
+            ...postCloseKeyboard(hasProfit) 
+          });
         } else if (response?.resting) {
           // Order is resting (limit order waiting to fill)
           await ctx.editMessageText(
@@ -1400,7 +1588,7 @@ export function registerHandlers(bot: Telegraf) {
           // Fallback - check if position is actually closed
           const position = await hl.getGoldPosition(user.walletAddress);
           if (!position || parseFloat(position.position.szi) === 0) {
-            await ctx.editMessageText('✅ Position closed.', mainMenuKeyboard());
+            await ctx.editMessageText('✅ Position closed.', postCloseKeyboard(false));
           } else {
             await ctx.editMessageText('⚠️ Close order submitted. Check /status to verify.', mainMenuKeyboard());
           }
@@ -1646,6 +1834,45 @@ async function handleSideSelection(ctx: Context, side: 'long' | 'short') {
   if (!user) {
     await ctx.reply('Please connect your wallet first.', connectWalletKeyboard(MINIAPP_URL));
     return;
+  }
+
+  // Pre-check: ensure user has minimum balance to trade
+  try {
+    const hl = await getHyperliquidClient();
+    const [state, arbBalances] = await Promise.all([
+      hl.getUserState(user.walletAddress),
+      getArbitrumBalances(user.walletAddress),
+    ]);
+    
+    const hlBalance = parseFloat(state.marginSummary.accountValue);
+    const arbBalance = parseFloat(arbBalances.usdc);
+    
+    // Case 1: Has funds on Arbitrum but not on Hyperliquid → prompt bridge
+    if (hlBalance < MIN_TRADE_BALANCE && arbBalance >= 5) {
+      await ctx.reply(
+        `⚠️ *Bridge Required*\n\n` +
+        `You have $${arbBalance.toFixed(2)} USDC on Arbitrum.\n` +
+        `Bridge it to Hyperliquid to start trading.\n\n` +
+        `💡 _This takes ~10 seconds_`,
+        { parse_mode: 'Markdown', ...bridgePromptKeyboard(MINIAPP_URL) }
+      );
+      return;
+    }
+    
+    // Case 2: No funds anywhere → prompt to fund
+    if (hlBalance < MIN_TRADE_BALANCE) {
+      await ctx.reply(
+        `💰 *Fund Your Account*\n\n` +
+        `Minimum $${MIN_TRADE_BALANCE} required to trade.\n` +
+        `Current balance: $${hlBalance.toFixed(2)}\n\n` +
+        `Buy USDC with card or crypto:`,
+        { parse_mode: 'Markdown', ...fundPromptKeyboard(MINIAPP_URL) }
+      );
+      return;
+    }
+  } catch (error) {
+    console.error('[PreTradeCheck] Error in handleSideSelection:', error);
+    // Continue with order flow if check fails - will be caught at execution
   }
 
   const session: OrderContext = { side, step: 'select_size' };
@@ -1948,6 +2175,115 @@ async function handleCloseText(
     } else {
       await ctx.reply(`❌ Error: ${message}`, mainMenuKeyboard());
     }
+  }
+}
+
+/**
+ * Handle deposit help action - show funding instructions
+ */
+async function handleDepositHelp(ctx: Context) {
+  await ctx.answerCbQuery();
+  
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+  
+  let walletInfo = '';
+  if (user) {
+    walletInfo = `\n\n💳 *Your Wallet:*\n\`${user.walletAddress}\``;
+  }
+  
+  await ctx.editMessageText(
+    `💰 *How to Fund Your Wallet*${walletInfo}\n\n` +
+    `*Option 1: Buy with Card*\n` +
+    `• Tap "Buy USDC" below\n` +
+    `• Use card, bank transfer, Apple Pay, etc.\n` +
+    `• USDC arrives on Arbitrum (~5 min)\n` +
+    `• Bridge to Hyperliquid to trade\n\n` +
+    `*Option 2: Send Crypto*\n` +
+    `• Send USDC to your wallet address above\n` +
+    `• Use *Arbitrum One* network\n` +
+    `• Then bridge to Hyperliquid\n\n` +
+    `💡 *Minimum:* $10 to start trading`,
+    { 
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💳 Buy USDC', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+          [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
+        ],
+      },
+    }
+  );
+}
+
+/**
+ * Handle withdraw action from callback buttons
+ */
+async function handleWithdrawAction(ctx: Context) {
+  await ctx.answerCbQuery();
+  
+  const telegramId = BigInt(ctx.from!.id);
+  const user = await getUserByTelegramId(telegramId);
+  
+  if (!user) {
+    await ctx.editMessageText('Please connect your wallet first.');
+    return;
+  }
+  
+  try {
+    const hl = await getHyperliquidClient();
+    const [hlBalance, arbBalance, position] = await Promise.all([
+      hl.getAccountBalance(user.walletAddress),
+      hl.getArbitrumBalance(user.walletAddress),
+      hl.getGoldPosition(user.walletAddress),
+    ]);
+
+    const hlWithdrawable = parseFloat(hlBalance.withdrawable || '0');
+    const hlTotal = parseFloat(hlBalance.balance?.toString() || '0');
+    const arbUsdc = arbBalance.usdc;
+    const hasPosition = position && parseFloat(position.position.szi) !== 0;
+
+    let message = `🏦 *Withdraw to Bank*\n\n`;
+    message += `💎 *Hyperliquid:* $${hlWithdrawable.toFixed(2)} withdrawable\n`;
+    message += `🔷 *Arbitrum:* $${arbUsdc.toFixed(2)} USDC\n\n`;
+
+    const buttons: any[][] = [];
+
+    // Check if funds are locked in position
+    if (hlWithdrawable < 1 && hlTotal > 10 && hasPosition) {
+      const positionSize = Math.abs(parseFloat(position.position.szi));
+      const entryPrice = parseFloat(position.position.entryPx);
+      const pnl = parseFloat(position.position.unrealizedPnl);
+      const notional = (positionSize * entryPrice).toFixed(2);
+      
+      message += `⚠️ *Funds Locked in Position*\n`;
+      message += `You have ~$${notional} in your ${pnl >= 0 ? 'profitable' : ''} position.\n`;
+      message += `Close it first to withdraw.\n\n`;
+      
+      buttons.push([{ text: '🔴 Close Position to Withdraw', callback_data: 'action:close' }]);
+    } else if (hlWithdrawable >= 1) {
+      message += `_Step 1:_ Unbridge from Hyperliquid to Arbitrum\n`;
+      message += `_Step 2:_ Sell USDC to fiat\n\n`;
+      buttons.push([{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)}`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
+    }
+
+    if (arbUsdc >= 1) {
+      buttons.push([{ text: '🏦 Sell USDC to Fiat', web_app: { url: `${MINIAPP_URL}?action=offramp` } }]);
+    }
+
+    if (buttons.length === 0) {
+      message += `⚠️ Minimum $1 required to withdraw.`;
+    }
+
+    buttons.push([{ text: '🏠 Main Menu', callback_data: 'action:menu' }]);
+
+    await ctx.editMessageText(message, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: buttons },
+    });
+  } catch (e: any) {
+    console.error('[WithdrawAction] Error:', e);
+    await ctx.editMessageText('❌ Failed to fetch balances. Try again.', mainMenuKeyboard());
   }
 }
 
