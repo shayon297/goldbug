@@ -53,17 +53,20 @@ async function main() {
   // Security middleware
   app.use(helmet());
 
-  // CORS - allow miniapp to call API
+  // CORS - allow miniapp, website, and analytics to call API
   const corsOrigins = [
     MINIAPP_URL,
     'https://miniapp-production-45a0.up.railway.app',
     'https://web.telegram.org',
+    'https://goldbug.app',
+    'https://www.goldbug.app',
+    'https://analytics-production-c25a.up.railway.app',
   ].filter(Boolean);
   
   app.use(cors({
     origin: corsOrigins.length > 0 ? corsOrigins : '*',
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Telegram-Init-Data'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Telegram-Init-Data', 'x-api-key'],
     credentials: true,
   }));
 

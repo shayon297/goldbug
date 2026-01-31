@@ -140,7 +140,7 @@ export default function HomePage() {
         </header>
 
         {/* Quick Links */}
-        <section className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-16 sm:mb-24 animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
+        <section className="grid grid-cols-2 gap-3 sm:gap-4 mb-16 sm:mb-24 max-w-md mx-auto animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
           <a
             href={BOT_LINK}
             target="_blank"
@@ -151,30 +151,6 @@ export default function HomePage() {
             <span className="text-3xl mb-2">🤖</span>
             <span className="text-sm font-semibold text-blue-400">Start Trading</span>
             <span className="text-xs text-zinc-500 mt-1">Open Bot</span>
-          </a>
-
-          <a
-            href={TWITTER_LINK}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group relative flex flex-col items-center justify-center p-6 rounded-2xl bg-gradient-to-br from-zinc-600/20 to-zinc-800/20 border border-zinc-500/30 hover:border-zinc-400/60 transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:shadow-zinc-500/10"
-          >
-            <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-zinc-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-            <span className="text-3xl mb-2">𝕏</span>
-            <span className="text-sm font-semibold text-zinc-300">Twitter</span>
-            <span className="text-xs text-zinc-500 mt-1">Follow Us</span>
-          </a>
-
-          <a
-            href={DOCS_LINK}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group relative flex flex-col items-center justify-center p-6 rounded-2xl bg-gradient-to-br from-purple-600/20 to-purple-800/20 border border-purple-500/30 hover:border-purple-400/60 transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:shadow-purple-500/10"
-          >
-            <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-purple-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-            <span className="text-3xl mb-2">📚</span>
-            <span className="text-sm font-semibold text-purple-400">Docs</span>
-            <span className="text-xs text-zinc-500 mt-1">How it Works</span>
           </a>
 
           <a
@@ -330,9 +306,6 @@ export default function HomePage() {
             <div className="flex items-center gap-4">
               <a href={BOT_LINK} target="_blank" rel="noopener noreferrer" className="text-zinc-500 hover:text-gold-400 transition-colors text-sm">
                 Telegram
-              </a>
-              <a href={TWITTER_LINK} target="_blank" rel="noopener noreferrer" className="text-zinc-500 hover:text-gold-400 transition-colors text-sm">
-                Twitter
               </a>
               <a href={SUPPORT_LINK} target="_blank" rel="noopener noreferrer" className="text-zinc-500 hover:text-gold-400 transition-colors text-sm">
                 Support
