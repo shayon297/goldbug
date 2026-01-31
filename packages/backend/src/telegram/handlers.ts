@@ -348,9 +348,9 @@ export function registerHandlers(bot: Telegraf) {
         if (balance < MIN_TRADE_BALANCE && arbUsdc >= 5) {
           await ctx.replyWithMarkdown(
             `📋 *Shared Trade*\n\n` +
-            `⚠️ *Bridge Required*\n\n` +
-            `You have $${arbUsdc.toFixed(2)} on Arbitrum.\n` +
-            `Bridge it to Hyperliquid first to copy this trade.`,
+            `⚠️ *Transfer Required*\n\n` +
+            `You have $${arbUsdc.toFixed(2)} ready to transfer.\n` +
+            `Move it to the exchange first to copy this trade.`,
             bridgePromptKeyboard(MINIAPP_URL)
           );
           return;
@@ -543,13 +543,12 @@ export function registerHandlers(bot: Telegraf) {
 
     await ctx.replyWithMarkdown(
       `💰 *Manage Funds*\n\n` +
-      `*Your Wallet:*\n\`${user.walletAddress}\`\n\n` +
       `Choose an option:`,
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '💳 Buy USDC', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
-            [{ text: '🌉 Bridge to Hyperliquid', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+            [{ text: '💳 Fund with Card', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+            [{ text: '💸 Transfer to Exchange', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
             [{ text: '🏦 Withdraw to Bank', web_app: { url: `${MINIAPP_URL}?action=offramp` } }],
             [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
           ],
@@ -643,22 +642,20 @@ export function registerHandlers(bot: Telegraf) {
     }
 
     await ctx.replyWithMarkdown(
-      `💰 *How to Fund Your Wallet*${walletInfo}\n` +
-      `*Step 1: Get USDC on Arbitrum*\n` +
-      `• Buy USDC on an exchange (Coinbase, Binance, etc.)\n` +
-      `• Withdraw to your wallet on *Arbitrum One*\n` +
-      `• Or bridge from another chain to Arbitrum\n\n` +
-      `*Step 2: Deposit to Hyperliquid*\n` +
-      `• Go to [app.hyperliquid.xyz](https://app.hyperliquid.xyz)\n` +
-      `• Connect the same wallet you linked here\n` +
-      `• Click *Deposit* and select USDC amount\n` +
-      `• Confirm the transaction (~$0.01 gas)\n\n` +
-      `*Step 3: Start Trading!*\n` +
-      `• Your USDC balance appears automatically\n` +
-      `• Use /long or /short to open positions\n` +
-      `• Trading on Hyperliquid is *gasless* ⚡\n\n` +
-      `💡 *Minimum:* $10 USDC to start trading\n` +
-      `➕ *Adding more later:* just send more USDC to the same wallet address above`
+      `💰 *How to Fund Your Account*${walletInfo}\n` +
+      `*Option 1: Card (Easiest)*\n` +
+      `Tap "Fund with Card" to buy with Visa/Mastercard.\n\n` +
+      `*Option 2: Crypto Transfer*\n` +
+      `Send USDC on Arbitrum to your account address above.\n\n` +
+      `💡 *Minimum:* $10 to start trading`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💳 Fund with Card', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+            [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
+          ],
+        },
+      }
     );
   });
 
@@ -695,26 +692,26 @@ export function registerHandlers(bot: Telegraf) {
       // No ETH for gas
       if (ethBalance < 0.0001) {
         await ctx.replyWithMarkdown(
-          `🌉 *Bridge USDC to Hyperliquid*\n\n` +
-          `⚠️ *No ETH for Gas*\n\n` +
-          `You have $${usdcBalance.toFixed(2)} USDC ready to bridge.\n` +
-          `But you need a tiny bit of ETH (~$0.01) for the transaction.\n\n` +
-          `Current ETH: ${ethBalance.toFixed(6)}`,
+          `💸 *Transfer to Exchange*\n\n` +
+          `⚠️ *Transaction Fee Required*\n\n` +
+          `You have $${usdcBalance.toFixed(2)} ready to transfer.\n` +
+          `Need a tiny transaction fee (~$0.01) to proceed.\n\n` +
+          `Tap below to get fee covered:`,
           gasHelpKeyboard(MINIAPP_URL)
         );
         return;
       }
 
-      // All good - show bridge button
+      // All good - show transfer button
       await ctx.replyWithMarkdown(
-        `🌉 *Bridge USDC to Hyperliquid*\n\n` +
-        `💵 Available: $${usdcBalance.toFixed(2)} USDC\n` +
-        `⛽ Gas: ${ethBalance.toFixed(4)} ETH ✓\n\n` +
-        `Tap below to bridge instantly (~10 seconds):`,
+        `💸 *Transfer to Exchange*\n\n` +
+        `💵 Available: $${usdcBalance.toFixed(2)}\n` +
+        `✓ Ready to transfer\n\n` +
+        `Tap below to move funds to the exchange (~10 seconds):`,
         {
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🌉 Bridge Now', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+              [{ text: '💸 Transfer Now', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
               [{ text: '🏠 Main Menu', callback_data: 'action:menu' }],
             ],
           },
@@ -723,13 +720,12 @@ export function registerHandlers(bot: Telegraf) {
     } catch (error) {
       console.error('[Bridge] Error checking balances:', error);
       await ctx.replyWithMarkdown(
-        `🌉 *Bridge USDC to Hyperliquid*\n\n` +
-        `Your wallet:\n\`${user.walletAddress}\`\n\n` +
-        `Tap below to bridge:`,
+        `💸 *Transfer to Exchange*\n\n` +
+        `Tap below to move funds:`,
         {
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🌉 Bridge Now', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
+              [{ text: '💸 Transfer Now', web_app: { url: `${MINIAPP_URL}?action=bridge` } }],
             ],
           },
         }
@@ -748,13 +744,13 @@ export function registerHandlers(bot: Telegraf) {
     }
 
     await ctx.replyWithMarkdown(
-      `💳 *Buy USDC*\n\n` +
-      `Purchase USDC with card, bank transfer, or other payment methods.\n` +
-      `KYC may be required depending on your region.`,
+      `💳 *Fund Your Account*\n\n` +
+      `Add funds with card, bank transfer, or other payment methods.\n` +
+      `ID verification may be required depending on your region.`,
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '💳 Buy USDC', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
+            [{ text: '💳 Fund with Card', web_app: { url: `${MINIAPP_URL}?action=onramp` } }],
           ],
         },
       }
@@ -784,21 +780,21 @@ export function registerHandlers(bot: Telegraf) {
 
       const buttons: any[][] = [];
 
-      // Primary case: Funds on HL but not on Arb - must unbridge first
+      // Primary case: Funds on exchange but not ready to withdraw
       if (hlWithdrawable >= 1 && arbUsdc < 1) {
-        const message = `🏦 *Sell USDC to Fiat*\n\n` +
-          `⚠️ *Your funds are on Hyperliquid*\n\n` +
-          `To sell to fiat, you need to:\n` +
-          `1️⃣ Unbridge from Hyperliquid → Arbitrum\n` +
-          `2️⃣ Sell USDC to fiat\n\n` +
-          `💎 *On Hyperliquid:* $${hlWithdrawable.toFixed(2)}\n` +
-          `🔷 *On Arbitrum:* $${arbUsdc.toFixed(2)}\n\n` +
+        const message = `🏦 *Withdraw to Bank*\n\n` +
+          `⚠️ *Funds on Exchange*\n\n` +
+          `To withdraw to your bank:\n` +
+          `1️⃣ Move funds from exchange\n` +
+          `2️⃣ Withdraw to bank\n\n` +
+          `📈 *Exchange:* $${hlWithdrawable.toFixed(2)}\n` +
+          `💵 *Ready to withdraw:* $${arbUsdc.toFixed(2)}\n\n` +
           `Tap below to start:`;
         
         await ctx.replyWithMarkdown(message, {
           reply_markup: {
             inline_keyboard: [
-              [{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)} First`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }],
+              [{ text: `📤 Move $${hlWithdrawable.toFixed(2)} from Exchange`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }],
               [{ text: '« Back', callback_data: 'menu:main' }],
             ],
           },
@@ -806,17 +802,17 @@ export function registerHandlers(bot: Telegraf) {
         return;
       }
 
-      // Case: USDC on Arbitrum ready to sell
+      // Case: Ready to withdraw to bank
       if (arbUsdc >= 1) {
-        const message = `🏦 *Sell USDC to Fiat*\n\n` +
-          `✅ You have $${arbUsdc.toFixed(2)} USDC ready to sell.\n\n` +
-          `💎 *On Hyperliquid:* $${hlWithdrawable.toFixed(2)}\n` +
-          `🔷 *On Arbitrum:* $${arbUsdc.toFixed(2)}\n\n` +
-          `Tap below to sell:`;
+        const message = `🏦 *Withdraw to Bank*\n\n` +
+          `✅ You have $${arbUsdc.toFixed(2)} ready to withdraw.\n\n` +
+          `📈 *Exchange:* $${hlWithdrawable.toFixed(2)}\n` +
+          `💵 *Ready to withdraw:* $${arbUsdc.toFixed(2)}\n\n` +
+          `Tap below:`;
 
-        buttons.push([{ text: '🏦 Sell USDC to Fiat', web_app: { url: `${MINIAPP_URL}?action=offramp` } }]);
+        buttons.push([{ text: '🏦 Withdraw to Bank', web_app: { url: `${MINIAPP_URL}?action=offramp` } }]);
         if (hlWithdrawable >= 1) {
-          buttons.push([{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)} More`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
+          buttons.push([{ text: `📤 Move $${hlWithdrawable.toFixed(2)} More`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
         }
         buttons.push([{ text: '« Back', callback_data: 'menu:main' }]);
         
@@ -827,11 +823,11 @@ export function registerHandlers(bot: Telegraf) {
       }
 
       // Case: No funds anywhere
-      const message = `🏦 *Sell USDC to Fiat*\n\n` +
+      const message = `🏦 *Withdraw to Bank*\n\n` +
         `⚠️ *No funds available*\n\n` +
-        `💎 *On Hyperliquid:* $${hlWithdrawable.toFixed(2)}\n` +
-        `🔷 *On Arbitrum:* $${arbUsdc.toFixed(2)}\n\n` +
-        `Minimum $1 required to sell.`;
+        `📈 *Exchange:* $${hlWithdrawable.toFixed(2)}\n` +
+        `💵 *Ready to withdraw:* $${arbUsdc.toFixed(2)}\n\n` +
+        `Minimum $1 required.`;
 
       await ctx.replyWithMarkdown(message, {
         reply_markup: {
@@ -867,10 +863,10 @@ export function registerHandlers(bot: Telegraf) {
       const arbUsdc = arbBalance.usdc;
       const hasPosition = position && parseFloat(position.position.szi) !== 0;
 
-      // Show balances on both chains
+      // Show balances
       let message = `🏦 *Withdraw to Bank*\n\n`;
-      message += `💎 *Hyperliquid:* $${hlWithdrawable.toFixed(2)} withdrawable\n`;
-      message += `🔷 *Arbitrum:* $${arbUsdc.toFixed(2)} USDC\n\n`;
+      message += `📈 *Exchange:* $${hlWithdrawable.toFixed(2)}\n`;
+      message += `💵 *Ready to withdraw:* $${arbUsdc.toFixed(2)}\n\n`;
 
       const buttons: any[][] = [];
 
@@ -881,19 +877,19 @@ export function registerHandlers(bot: Telegraf) {
         const pnl = parseFloat(position.position.unrealizedPnl);
         const notional = (positionSize * entryPrice).toFixed(2);
         
-        message += `⚠️ *Funds Locked in Position*\n`;
+        message += `⚠️ *Funds in Open Position*\n`;
         message += `You have ~$${notional} in your ${pnl >= 0 ? 'profitable' : ''} position.\n`;
         message += `Close it first to withdraw.\n\n`;
         
         buttons.push([{ text: '🔴 Close Position to Withdraw', callback_data: 'action:close' }]);
       } else if (hlWithdrawable >= 1) {
-        message += `_Step 1:_ Unbridge from Hyperliquid to Arbitrum\n`;
-        message += `_Step 2:_ Sell USDC to fiat\n\n`;
-        buttons.push([{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)}`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
+        message += `_Step 1:_ Move funds from exchange\n`;
+        message += `_Step 2:_ Withdraw to bank\n\n`;
+        buttons.push([{ text: `📤 Move $${hlWithdrawable.toFixed(2)} from Exchange`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
       }
 
       if (arbUsdc >= 1) {
-        buttons.push([{ text: '🏦 Sell USDC to Fiat', web_app: { url: `${MINIAPP_URL}?action=offramp` } }]);
+        buttons.push([{ text: '🏦 Withdraw to Bank', web_app: { url: `${MINIAPP_URL}?action=offramp` } }]);
       }
 
       if (buttons.length === 0) {
@@ -1859,7 +1855,7 @@ export function registerHandlers(bot: Telegraf) {
       return;
     }
 
-    await ctx.editMessageText(`⏳ Withdrawing $${amount.toFixed(2)} from Hyperliquid to Arbitrum...`);
+    await ctx.editMessageText(`⏳ Moving $${amount.toFixed(2)} from exchange...`);
 
     try {
       const hl = await getHyperliquidClient();
@@ -1870,14 +1866,14 @@ export function registerHandlers(bot: Telegraf) {
 
       if (result.status === 'ok') {
         await ctx.editMessageText(
-          `✅ *Withdrawal Initiated*\n\n` +
-          `$${amount.toFixed(2)} USDC is being transferred to Arbitrum.\n\n` +
-          `⏱️ This takes 1-5 minutes. Once confirmed, tap below to sell:\n`,
+          `✅ *Funds Moving*\n\n` +
+          `$${amount.toFixed(2)} is being moved from the exchange.\n\n` +
+          `⏱️ Takes 1-5 minutes. Then tap below to withdraw to bank:\n`,
           { 
             parse_mode: 'Markdown',
             reply_markup: {
               inline_keyboard: [
-                [{ text: '🏦 Sell USDC to Fiat', web_app: { url: `${MINIAPP_URL}?action=offramp` } }],
+                [{ text: '🏦 Withdraw to Bank', web_app: { url: `${MINIAPP_URL}?action=offramp` } }],
                 [{ text: '🔄 Refresh Balance', callback_data: 'menu:refresh_withdraw' }],
               ],
             },
@@ -2566,8 +2562,8 @@ async function handleWithdrawAction(ctx: Context) {
     const hasPosition = position && parseFloat(position.position.szi) !== 0;
 
     let message = `🏦 *Withdraw to Bank*\n\n`;
-    message += `💎 *Hyperliquid:* $${hlWithdrawable.toFixed(2)} withdrawable\n`;
-    message += `🔷 *Arbitrum:* $${arbUsdc.toFixed(2)} USDC\n\n`;
+    message += `📈 *Exchange:* $${hlWithdrawable.toFixed(2)}\n`;
+    message += `💵 *Ready to withdraw:* $${arbUsdc.toFixed(2)}\n\n`;
 
     const buttons: any[][] = [];
 
@@ -2578,19 +2574,19 @@ async function handleWithdrawAction(ctx: Context) {
       const pnl = parseFloat(position.position.unrealizedPnl);
       const notional = (positionSize * entryPrice).toFixed(2);
       
-      message += `⚠️ *Funds Locked in Position*\n`;
+      message += `⚠️ *Funds in Open Position*\n`;
       message += `You have ~$${notional} in your ${pnl >= 0 ? 'profitable' : ''} position.\n`;
       message += `Close it first to withdraw.\n\n`;
       
       buttons.push([{ text: '🔴 Close Position to Withdraw', callback_data: 'action:close' }]);
     } else if (hlWithdrawable >= 1) {
-      message += `_Step 1:_ Unbridge from Hyperliquid to Arbitrum\n`;
-      message += `_Step 2:_ Sell USDC to fiat\n\n`;
-      buttons.push([{ text: `📤 Unbridge $${hlWithdrawable.toFixed(2)}`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
+      message += `_Step 1:_ Move funds from exchange\n`;
+      message += `_Step 2:_ Withdraw to bank\n\n`;
+      buttons.push([{ text: `📤 Move $${hlWithdrawable.toFixed(2)} from Exchange`, callback_data: `withdraw:unbridge:${hlWithdrawable}` }]);
     }
 
     if (arbUsdc >= 1) {
-      buttons.push([{ text: '🏦 Sell USDC to Fiat', web_app: { url: `${MINIAPP_URL}?action=offramp` } }]);
+      buttons.push([{ text: '🏦 Withdraw to Bank', web_app: { url: `${MINIAPP_URL}?action=offramp` } }]);
     }
 
     if (buttons.length === 0) {

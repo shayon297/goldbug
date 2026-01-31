@@ -64,7 +64,7 @@ export function dashboardKeyboard(hasPosition: boolean, miniAppUrl: string) {
     ],
     [
       Markup.button.callback('📊 Details', 'action:details'),
-      Markup.button.webApp('💳 Add Funds', `${miniAppUrl}?action=onramp`),
+      Markup.button.webApp('💳 Fund Account', `${miniAppUrl}?action=onramp`),
     ],
   ]);
 }
@@ -285,7 +285,7 @@ export function bridgePromptKeyboard(miniAppUrl: string) {
  */
 export function fundPromptKeyboard(miniAppUrl: string) {
   return Markup.inlineKeyboard([
-    [Markup.button.webApp('💳 Buy USDC', `${miniAppUrl}?action=onramp`)],
+    [Markup.button.webApp('💳 Fund with Card', `${miniAppUrl}?action=onramp`)],
     [Markup.button.callback('📋 How to Fund', 'action:deposit_help')],
     [Markup.button.callback('🏠 Main Menu', 'action:menu')],
   ]);
@@ -366,7 +366,7 @@ export function lowBalanceDashboardKeyboard(miniAppUrl: string, hasArbFunds: boo
 // ============================================
 
 /**
- * Gas help keyboard - when user has USDC but no ETH for gas
+ * Gas help keyboard - when user has funds but needs transaction fee
  */
 export function gasHelpKeyboard(miniAppUrl: string) {
   return Markup.inlineKeyboard([
@@ -377,11 +377,11 @@ export function gasHelpKeyboard(miniAppUrl: string) {
 }
 
 /**
- * No USDC on Arbitrum - prompt to buy
+ * No funds to transfer - prompt to fund
  */
 export function noUsdcKeyboard(miniAppUrl: string) {
   return Markup.inlineKeyboard([
-    [Markup.button.webApp('💳 Buy USDC', `${miniAppUrl}?action=onramp`)],
+    [Markup.button.webApp('💳 Fund with Card', `${miniAppUrl}?action=onramp`)],
     [Markup.button.callback('📋 How to Fund', 'action:deposit_help')],
     [Markup.button.callback('🏠 Main Menu', 'action:menu')],
   ]);

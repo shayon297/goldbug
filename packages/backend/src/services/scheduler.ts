@@ -3,7 +3,7 @@ import { getAllUsers } from '../state/db.js';
 import { getHyperliquidClient, TRADING_ASSET } from '../hyperliquid/client.js';
 import { generateChartBuffer, generateChartSummary } from './chart.js';
 
-const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
 
 /**
  * Broadcast chart to all users
@@ -69,21 +69,17 @@ async function broadcastChart(bot: Telegraf): Promise<void> {
 }
 
 /**
- * Start the 6-hour chart broadcast scheduler
+ * Start the 4-hour chart broadcast scheduler
  */
 export function startChartScheduler(bot: Telegraf): void {
-  console.log('[Scheduler] Starting 6-hour chart broadcast scheduler');
+  console.log('[Scheduler] Starting 4-hour chart broadcast scheduler');
 
-  // Schedule broadcast every 6 hours
+  // Schedule broadcast every 4 hours
   setInterval(() => {
     broadcastChart(bot);
-  }, SIX_HOURS_MS);
+  }, FOUR_HOURS_MS);
 
-  // Also broadcast 1 minute after startup (to verify it works)
-  setTimeout(() => {
-    console.log('[Scheduler] Running initial chart broadcast');
-    broadcastChart(bot);
-  }, 60 * 1000);
+  // Note: Removed 1-minute startup broadcast to prevent spam on container restarts
 }
 
 /**

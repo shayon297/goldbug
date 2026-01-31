@@ -1250,7 +1250,7 @@ async function main() {
     await startBot(bot);
   }
 
-  // Start 6-hour chart broadcast scheduler
+  // Start 4-hour chart broadcast scheduler
   startChartScheduler(bot);
 
   // Hourly (6h) position updates
